@@ -1,5 +1,6 @@
 use crate::{errors::*, InteractRequest};
-use near_sdk::{env};
+use near_sdk::{env, Gas};
+
 
 pub const WITHDRAW_METADATA: u8 = 157;
 pub const SWAP_BEACON_METADATA: u8 = 158;
@@ -8,6 +9,10 @@ pub const BURN_METADATA: u8 = 160;
 pub const NEAR_ADDRESS: &str = "0000000000000000000000000000000000000001";
 pub const WITHDRAW_INST_LEN: usize = 1 + 1 + 1 + 64 + 1 + 64 + 32 + 32; // ignore last 64 bytes in instruction
 pub const SWAP_COMMITTEE_INST_LEN: usize = 1 + 1 + 32 + 32 + 32;
+
+pub const GAS_FOR_FT_TRANSFER: Gas = Gas(20_000_000_000_000);
+pub const GAS_FOR_RESOLVE_DEPOSIT: Gas = Gas(20_000_000_000_000);
+pub const GAS_FOR_RETRIEVE_INFO: Gas = Gas(10_000_000_000_000);
 
 pub fn verify_inst(
     request_info: &InteractRequest, beacons: Vec<String>,

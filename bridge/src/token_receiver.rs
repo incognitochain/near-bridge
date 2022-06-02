@@ -7,6 +7,9 @@ use near_sdk::json_types::U128;
 use crate::errors::*;
 use crate::*;
 
+use crate::utils::{GAS_FOR_RESOLVE_DEPOSIT, GAS_FOR_RETRIEVE_INFO};
+
+
 /// Message parameters to receive via token function call.
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(crate = "near_sdk::serde")]
@@ -43,13 +46,13 @@ impl FungibleTokenReceiver for Vault {
                 ext_ft::ft_metadata(
                     token_in.clone(),
                     0,
-                    Gas(5_000_000_000_000),          // gas to attach
+                    GAS_FOR_RETRIEVE_INFO,          // gas to attach
                 )
                 .and(ext_ft::ft_balance_of(
                     env::current_account_id().clone(),
                     token_in.clone(),
                     0,
-                    Gas(5_000_000_000_000),         // gas to attach
+                    GAS_FOR_RETRIEVE_INFO,         // gas to attach
                 ))
                 .then(ext_self::fallback_deposit(
                     incognito_address,
@@ -57,7 +60,7 @@ impl FungibleTokenReceiver for Vault {
                     amount,
                     env::current_account_id().clone(),
                     0,
-                    Gas(5_000_000_000_000),          // gas to attach to the callback
+                    GAS_FOR_RESOLVE_DEPOSIT,          // gas to attach to the callback
                 )).into()
             }
         }

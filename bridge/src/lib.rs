@@ -19,6 +19,7 @@ use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::collections::{LookupMap, TreeMap};
 use crate::errors::*;
 use crate::utils::{NEAR_ADDRESS, WITHDRAW_INST_LEN, SWAP_COMMITTEE_INST_LEN, WITHDRAW_METADATA, SWAP_BEACON_METADATA, BURN_METADATA};
+use crate::utils::{GAS_FOR_FT_TRANSFER};
 use crate::utils::{verify_inst};
 use arrayref::{array_refs, array_ref};
 use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
@@ -191,7 +192,7 @@ impl Vault {
                 None,
                 token,
                 1,
-                Gas(5_000_000_000_000),
+                GAS_FOR_FT_TRANSFER,
             ).into()
         }
     }
