@@ -54,7 +54,7 @@ impl FungibleTokenReceiver for Vault {
                     0,
                     GAS_FOR_RETRIEVE_INFO,         // gas to attach
                 ))
-                .then(ext_self::fallback_deposit(
+                .then(ext_self::callback_deposit(
                     incognito_address,
                     token_in,
                     amount,

@@ -84,7 +84,7 @@ pub trait FtContract {
 // define methods we'll use as callbacks on ContractA
 #[ext_contract(ext_self)]
 pub trait VaultContract {
-    fn fallback_deposit(
+    fn callback_deposit(
         &self,
         incognito_address: String,
         token: AccountId,
@@ -308,8 +308,8 @@ impl Vault {
         self.tx_burn.get(tx_id).unwrap_or_default()
     }
 
-    /// fallbacks
-    pub fn fallback_deposit(&mut self, incognito_address: String, token: AccountId, amount: u128) -> PromiseOrValue<U128> {
+    /// callbacks
+    pub fn callback_deposit(&mut self, incognito_address: String, token: AccountId, amount: u128) -> PromiseOrValue<U128> {
         assert_eq!(env::promise_results_count(), 2, "This is a callback method");
 
         // handle the result from the second cross contract call this method is a callback for
