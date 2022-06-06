@@ -13,6 +13,7 @@ pub const SWAP_COMMITTEE_INST_LEN: usize = 1 + 1 + 32 + 32 + 32;
 pub const GAS_FOR_FT_TRANSFER: Gas = Gas(20_000_000_000_000);
 pub const GAS_FOR_RESOLVE_DEPOSIT: Gas = Gas(20_000_000_000_000);
 pub const GAS_FOR_RETRIEVE_INFO: Gas = Gas(10_000_000_000_000);
+pub const GAS_FOR_CALL_PROXY: Gas = Gas(20_000_000_000_000);
 
 pub fn verify_inst(
     request_info: &InteractRequest, beacons: Vec<String>,

@@ -19,7 +19,7 @@ use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::collections::{LookupMap, TreeMap};
 use crate::errors::*;
 use crate::utils::{NEAR_ADDRESS, WITHDRAW_INST_LEN, SWAP_COMMITTEE_INST_LEN, WITHDRAW_METADATA, SWAP_BEACON_METADATA, BURN_METADATA};
-use crate::utils::{GAS_FOR_FT_TRANSFER};
+use crate::utils::{GAS_FOR_FT_TRANSFER, GAS_FOR_CALL_PROXY};
 use crate::utils::{verify_inst};
 use arrayref::{array_refs, array_ref};
 use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
@@ -49,6 +49,18 @@ pub struct InteractRequest {
     pub vs: Vec<u8>
 }
 
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "near_sdk::serde")]
+pub struct ExecuteRequest {
+    pub proxy: String,
+    pub token: String,
+    pub amount: u128,
+    pub timestamp: u128,
+    pub call_data: String,
+    pub signature: String,
+    pub v: u8,
+}
+
 #[derive(BorshStorageKey, BorshSerialize)]
 pub(crate) enum StorageKey {
     Transaction,
@@ -68,7 +80,7 @@ pub struct Vault {
     // total withdraw request
     pub total_credit_amount: LookupMap<String, u128>,
     // total credit amount for each account
-    pub credit_amount: LookupMap<(String, String), u128>,
+    pub credit_amount: LookupMap<(String, [u8; 32]), u128>,
     // store token decimal
     pub token_decimals: LookupMap<String, u8>,
 }
@@ -79,6 +91,12 @@ pub trait FtContract {
     fn ft_metadata(&self) -> FungibleTokenMetadata;
     fn ft_balance_of(&mut self, account_id: AccountId) -> U128;
     fn ft_transfer(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>);
+}
+
+#[ext_contract(ext_proxy)]
+pub trait ProxyContract {
+    fn ft_transfer_call(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>, msg: String);
+    fn call_dapp(&mut self, msg: String);
 }
 
 // define methods we'll use as callbacks on ContractA
@@ -273,6 +291,10 @@ impl Vault {
         let receiver_key = &receiver_key[64 - receiver_len as usize..];
         let receiver_key: String = String::from_utf8(receiver_key.to_vec()).unwrap_or_default();
 
+        // receiver generated from the Incognito account
+        let receiver_bytes = hex::decode(receiver_key).unwrap();
+        let receiver_bytes = array_ref![receiver_bytes, 0, 32];
+
         // validate metatype and key provided
         if (meta_type != BURN_METADATA) || shard_id != 1 {
             panic!("{}", INVALID_METADATA);
@@ -285,15 +307,50 @@ impl Vault {
         self.tx_burn.insert(&tx_id, &true);
 
         let token: AccountId = AccountId::try_from(hex::encode(token)).unwrap();
-        let account: AccountId = AccountId::try_from(hex::encode(receiver_key)).unwrap();
 
+        let amount = self.credit_amount.get(&(token.to_string(), *receiver_bytes)).unwrap_or_default();
+        self.credit_amount.insert(&(token.to_string(), *receiver_bytes), &(amount + burn_amount));
         let amount = self.total_credit_amount.get(&token.to_string()).unwrap_or_default();
         self.total_credit_amount.insert(&token.to_string(), &(amount + burn_amount));
-        let amount = self.credit_amount.get(&(token.to_string(), account.to_string())).unwrap_or_default();
-        self.credit_amount.insert(&(token.to_string(), account.to_string()), &(amount + burn_amount));
     }
 
+    // call proxy for requesting to execute dapps
+    pub fn execute(
+        &mut self,
+        request: ExecuteRequest,
+    ) -> Promise {
+        // TODO: verify_sign_data(request);
+        let verifier: [u8; 32];
 
+        let amount = self.credit_amount.get(&(request.token.to_string(), verifier)).unwrap_or_default();
+        assert!(amount >= request.amount, "{}", VALUE_EXCEEDED);
+        self.credit_amount.insert(&(request.token.to_string(), verifier), &(amount - request.amount));
+        let amount = self.total_credit_amount.get(&request.token.to_string()).unwrap_or_default();
+        self.total_credit_amount.insert(&request.token.to_string(), &(amount - request.amount));
+
+        let proxy_id: AccountId = request.proxy.try_into().unwrap();
+
+        if request.token == NEAR_ADDRESS {
+            ext_proxy::call_dapp(
+                request.call_data,
+                proxy_id,
+                request.amount,
+                GAS_FOR_CALL_PROXY,
+            ).into()
+        } else {
+            let token_id: AccountId = request.token.try_into().unwrap();
+            ext_proxy::ft_transfer_call(
+                proxy_id,
+                U128(request.amount),
+                None,
+                request.call_data,
+                token_id,
+                1,
+                GAS_FOR_CALL_PROXY,
+            ).into()
+        }
+
+    }
 
     /// getters
 
