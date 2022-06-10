@@ -47,8 +47,7 @@ impl FungibleTokenReceiver for Vault {
                     token_in.clone(),
                     0,
                     GAS_FOR_RETRIEVE_INFO,          // gas to attach
-                )
-                .and(ext_ft::ft_balance_of(
+                ).and(ext_ft::ft_balance_of(
                     env::current_account_id().clone(),
                     token_in.clone(),
                     0,

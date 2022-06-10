@@ -19,7 +19,7 @@ use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::collections::{LookupMap, TreeMap};
 use crate::errors::*;
 use crate::utils::{NEAR_ADDRESS, WITHDRAW_INST_LEN, SWAP_COMMITTEE_INST_LEN, WITHDRAW_METADATA, SWAP_BEACON_METADATA, BURN_METADATA};
-use crate::utils::{GAS_FOR_FT_TRANSFER, GAS_FOR_CALL_PROXY};
+use crate::utils::{GAS_FOR_FT_TRANSFER, GAS_FOR_EXECUTE, GAS_FOR_RESOLVE_EXECUTE};
 use crate::utils::{verify_inst};
 use arrayref::{array_refs, array_ref};
 use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
@@ -107,6 +107,12 @@ pub trait VaultContract {
         incognito_address: String,
         token: AccountId,
         amount: u128,
+    );
+    fn callback_execute(
+        &self,
+        verifier: [u8; 32],
+        token_in: String,
+        amount_in: u128,
     );
 }
 
@@ -335,10 +341,17 @@ impl Vault {
                 request.call_data,
                 proxy_id,
                 request.amount,
-                GAS_FOR_CALL_PROXY,
-            ).into()
+                GAS_FOR_EXECUTE,
+            ).then(ext_self::callback_execute(
+                verifier,
+                NEAR_ADDRESS.into(),
+                request.amount,
+                env::current_account_id().clone(),
+                0,
+                GAS_FOR_RESOLVE_EXECUTE,    
+            )).into()
         } else {
-            let token_id: AccountId = request.token.try_into().unwrap();
+            let token_id: AccountId = request.token.clone().try_into().unwrap();
             ext_proxy::ft_transfer_call(
                 proxy_id,
                 U128(request.amount),
@@ -346,8 +359,15 @@ impl Vault {
                 request.call_data,
                 token_id,
                 1,
-                GAS_FOR_CALL_PROXY,
-            ).into()
+                GAS_FOR_EXECUTE,
+            ).then(ext_self::callback_execute(
+                verifier,
+                request.token,
+                request.amount,
+                env::current_account_id().clone(),
+                0,
+                GAS_FOR_RESOLVE_EXECUTE,    
+            )).into()
         }
 
     }
@@ -407,6 +427,26 @@ impl Vault {
                 "{} {} {}",
                 incognito_address, token, emit_amount
             ).as_str());
+
+        PromiseOrValue::Value(U128(0))
+    }
+
+    pub fn callback_execute(&mut self, verifier: [u8; 32], token_in: String, amount_in: u128,) -> PromiseOrValue<U128> {
+        assert_eq!(env::promise_results_count(), 1, "This is a callback method");
+
+        // handle the result from the second cross contract call this method is a callback for
+        let (token_out, amount_out): (String, u128) = match env::promise_result(0) {
+            PromiseResult::NotReady => unreachable!(),
+            PromiseResult::Failed => (token_in, amount_in),
+            PromiseResult::Successful(result) => near_sdk::serde_json::from_slice::<(String, u128)>(&result)
+                .unwrap()
+                .into(),
+        };
+
+        let amount = self.credit_amount.get(&(token_out.clone(), verifier)).unwrap_or_default();
+        self.credit_amount.insert(&(token_out.clone(), verifier), &(amount + amount_out));
+        let amount = self.total_credit_amount.get(&token_out).unwrap_or_default();
+        self.total_credit_amount.insert(&token_out, &(amount + amount_out));
 
         PromiseOrValue::Value(U128(0))
     }
