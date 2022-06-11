@@ -44,20 +44,30 @@ const { connect } = nearAPI;
         senderAccount, // account object đang kết nối
         TOKEN_ADDRESS,
         {
-          changeMethods: ["ft_transfer_call"], 
+          changeMethods: ["ft_transfer_call", "ft_transfer", "storage_deposit"], 
           sender: senderAccount,
         }
       );
       
+    // register account id
+    await contract.storage_deposit(
+        {
+            account_id: "prv-test-shield.testnet",
+            registration_only: true,
+        },
+        "300000000000000",
+        "130000000000000000000000"
+    );
 
     // make shield Near request
     const incognitoAddress = "12svfkP6w5UDJDSCwqH978PvqiqBxKmUnA9em9yAYWYJVRv7wuXY1qhhYpPAm4BDz2mLbFrRmdK3yRhnTqJCZXKHUmoi7NV83HCH2YFpctHNaDdkSiQshsjw2UFUuwdEvcidgaKmF3VJpY5f8RdN";
-    await contract.ft_transfer_call(
+    await contract.ft_transfer(
             {
                 sender_id: "cuongcute.testnet", 
-                receiver_id: contractId, 
+                receiver_id: "prv-test-shield.testnet", 
                 amount: "10000000000",
-                msg: '{"incognito_address": "' + incognitoAddress + '"}'
+                memo: ""
+                // msg: '{"incognito_address": "' + incognitoAddress + '"}'
             },
             "300000000000000",
             "1"
