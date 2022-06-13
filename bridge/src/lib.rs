@@ -53,8 +53,6 @@ pub struct InteractRequest {
 pub(crate) enum StorageKey {
     Transaction,
     BeaconHeight,
-    TokenAccountID,
-    TokenUserAccountID,
     TokenDecimals,
 }
 
@@ -65,10 +63,6 @@ pub struct Vault {
     pub tx_burn: LookupMap<[u8; 32], bool>,
     // beacon committees
     pub beacons: TreeMap<u128, Vec<String>>,
-    // total withdraw request
-    pub total_credit_amount: LookupMap<String, u128>,
-    // total credit amount for each account
-    pub credit_amount: LookupMap<(String, String), u128>,
     // store token decimal
     pub token_decimals: LookupMap<String, u8>,
 }
@@ -105,8 +99,6 @@ impl Vault {
         let mut this = Self {
             tx_burn: LookupMap::new(StorageKey::Transaction), 
             beacons: TreeMap::new(StorageKey::BeaconHeight),
-            total_credit_amount: LookupMap::new(StorageKey::TokenAccountID),
-            credit_amount: LookupMap::new(StorageKey::TokenUserAccountID),
             token_decimals: LookupMap::new(StorageKey::TokenDecimals),
         };
         // insert beacon height and list in tree
@@ -283,14 +275,6 @@ impl Vault {
             panic!("{}", INVALID_TX_BURN);
         }
         self.tx_burn.insert(&tx_id, &true);
-
-        let token: AccountId = AccountId::try_from(hex::encode(token)).unwrap();
-        let account: AccountId = AccountId::try_from(hex::encode(receiver_key)).unwrap();
-
-        let amount = self.total_credit_amount.get(&token.to_string()).unwrap_or_default();
-        self.total_credit_amount.insert(&token.to_string(), &(amount + burn_amount));
-        let amount = self.credit_amount.get(&(token.to_string(), account.to_string())).unwrap_or_default();
-        self.credit_amount.insert(&(token.to_string(), account.to_string()), &(amount + burn_amount));
     }
 
 
