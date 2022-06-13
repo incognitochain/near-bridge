@@ -65,8 +65,6 @@ pub struct ExecuteRequest {
 pub(crate) enum StorageKey {
     Transaction,
     BeaconHeight,
-    TokenAccountID,
-    TokenUserAccountID,
     TokenDecimals,
 }
 
@@ -77,10 +75,6 @@ pub struct Vault {
     pub tx_burn: LookupMap<[u8; 32], bool>,
     // beacon committees
     pub beacons: TreeMap<u128, Vec<String>>,
-    // total withdraw request
-    pub total_credit_amount: LookupMap<String, u128>,
-    // total credit amount for each account
-    pub credit_amount: LookupMap<(String, [u8; 32]), u128>,
     // store token decimal
     pub token_decimals: LookupMap<String, u8>,
 }
@@ -129,8 +123,6 @@ impl Vault {
         let mut this = Self {
             tx_burn: LookupMap::new(StorageKey::Transaction), 
             beacons: TreeMap::new(StorageKey::BeaconHeight),
-            total_credit_amount: LookupMap::new(StorageKey::TokenAccountID),
-            credit_amount: LookupMap::new(StorageKey::TokenUserAccountID),
             token_decimals: LookupMap::new(StorageKey::TokenDecimals),
         };
         // insert beacon height and list in tree
@@ -311,13 +303,6 @@ impl Vault {
             panic!("{}", INVALID_TX_BURN);
         }
         self.tx_burn.insert(&tx_id, &true);
-
-        let token: AccountId = AccountId::try_from(hex::encode(token)).unwrap();
-
-        let amount = self.credit_amount.get(&(token.to_string(), *receiver_bytes)).unwrap_or_default();
-        self.credit_amount.insert(&(token.to_string(), *receiver_bytes), &(amount + burn_amount));
-        let amount = self.total_credit_amount.get(&token.to_string()).unwrap_or_default();
-        self.total_credit_amount.insert(&token.to_string(), &(amount + burn_amount));
     }
 
     // call proxy for requesting to execute dapps
@@ -327,12 +312,6 @@ impl Vault {
     ) -> Promise {
         // TODO: verify_sign_data(request);
         let verifier: [u8; 32];
-
-        let amount = self.credit_amount.get(&(request.token.to_string(), verifier)).unwrap_or_default();
-        assert!(amount >= request.amount, "{}", VALUE_EXCEEDED);
-        self.credit_amount.insert(&(request.token.to_string(), verifier), &(amount - request.amount));
-        let amount = self.total_credit_amount.get(&request.token.to_string()).unwrap_or_default();
-        self.total_credit_amount.insert(&request.token.to_string(), &(amount - request.amount));
 
         let proxy_id: AccountId = request.proxy.try_into().unwrap();
 
@@ -442,11 +421,6 @@ impl Vault {
                 .unwrap()
                 .into(),
         };
-
-        let amount = self.credit_amount.get(&(token_out.clone(), verifier)).unwrap_or_default();
-        self.credit_amount.insert(&(token_out.clone(), verifier), &(amount + amount_out));
-        let amount = self.total_credit_amount.get(&token_out).unwrap_or_default();
-        self.total_credit_amount.insert(&token_out, &(amount + amount_out));
 
         PromiseOrValue::Value(U128(0))
     }
