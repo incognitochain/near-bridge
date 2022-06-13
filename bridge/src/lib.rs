@@ -18,7 +18,7 @@ use near_sdk::{env, near_bindgen, BorshStorageKey, PanicOnDefault, ext_contract,
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::collections::{LookupMap, TreeMap};
 use crate::errors::*;
-use crate::utils::{NEAR_ADDRESS, WITHDRAW_INST_LEN, SWAP_COMMITTEE_INST_LEN, WITHDRAW_METADATA, SWAP_BEACON_METADATA, BURN_METADATA};
+use crate::utils::{PROXY_CONTRACT, NEAR_ADDRESS, WITHDRAW_INST_LEN, SWAP_COMMITTEE_INST_LEN, WITHDRAW_METADATA, SWAP_BEACON_METADATA, BURN_METADATA};
 use crate::utils::{GAS_FOR_FT_TRANSFER, GAS_FOR_EXECUTE, GAS_FOR_RESOLVE_EXECUTE};
 use crate::utils::{verify_inst};
 use arrayref::{array_refs, array_ref};
@@ -52,7 +52,6 @@ pub struct InteractRequest {
 #[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug, Clone)]
 #[serde(crate = "near_sdk::serde")]
 pub struct ExecuteRequest {
-    pub proxy: String,
     pub token: String,
     pub amount: u128,
     pub timestamp: u128,
@@ -85,12 +84,14 @@ pub trait FtContract {
     fn ft_metadata(&self) -> FungibleTokenMetadata;
     fn ft_balance_of(&mut self, account_id: AccountId) -> U128;
     fn ft_transfer(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>);
+    fn ft_transfer_call(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>, msg: String);
 }
 
 #[ext_contract(ext_proxy)]
 pub trait ProxyContract {
-    fn ft_transfer_call(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>, msg: String);
-    fn call_dapp(&mut self, msg: String);
+    fn deposit_near(&mut self, account_id: AccountId, wrap: bool);
+    fn call_dapp(&mut self, msg: String) -> (String, U128);
+    fn withdraw(&mut self, token_id: String, amount: U128, receiver_id: AccountId) -> U128;
 }
 
 // define methods we'll use as callbacks on ContractA
@@ -105,8 +106,6 @@ pub trait VaultContract {
     fn callback_execute(
         &self,
         verifier: [u8; 32],
-        token_in: String,
-        amount_in: u128,
     );
 }
 
@@ -267,7 +266,7 @@ impl Vault {
     pub fn submit_burn_proof(
         &mut self,
         burn_info: InteractRequest
-    ) {
+    ) -> Promise {
         let beacons = self.get_beacons(burn_info.height);
 
         // verify instruction
@@ -289,10 +288,6 @@ impl Vault {
         let receiver_key = &receiver_key[64 - receiver_len as usize..];
         let receiver_key: String = String::from_utf8(receiver_key.to_vec()).unwrap_or_default();
 
-        // receiver generated from the Incognito account
-        let receiver_bytes = hex::decode(receiver_key).unwrap();
-        let receiver_bytes = array_ref![receiver_bytes, 0, 32];
-
         // validate metatype and key provided
         if (meta_type != BURN_METADATA) || shard_id != 1 {
             panic!("{}", INVALID_METADATA);
@@ -303,6 +298,29 @@ impl Vault {
             panic!("{}", INVALID_TX_BURN);
         }
         self.tx_burn.insert(&tx_id, &true);
+
+        let account: AccountId = receiver_key.clone().try_into().unwrap();
+        let proxy: AccountId = PROXY_CONTRACT.to_string().try_into().unwrap();
+        if token == NEAR_ADDRESS {
+            ext_proxy::deposit_near(
+                account,
+                true,
+                proxy,
+                burn_amount,
+                GAS_FOR_FT_TRANSFER
+            ).into()
+        } else {
+            let token: AccountId = token.try_into().unwrap();
+            ext_ft::ft_transfer_call(
+                account,
+                U128(burn_amount),
+                None,
+                receiver_key,
+                token,
+                1,
+                GAS_FOR_FT_TRANSFER,
+            ).into()
+        }
     }
 
     // call proxy for requesting to execute dapps
@@ -313,41 +331,19 @@ impl Vault {
         // TODO: verify_sign_data(request);
         let verifier: [u8; 32];
 
-        let proxy_id: AccountId = request.proxy.try_into().unwrap();
+        let proxy_id: AccountId = PROXY_CONTRACT.to_string().try_into().unwrap();
 
-        if request.token == NEAR_ADDRESS {
-            ext_proxy::call_dapp(
+        ext_proxy::call_dapp(
                 request.call_data,
                 proxy_id,
                 request.amount,
                 GAS_FOR_EXECUTE,
             ).then(ext_self::callback_execute(
                 verifier,
-                NEAR_ADDRESS.into(),
-                request.amount,
                 env::current_account_id().clone(),
                 0,
                 GAS_FOR_RESOLVE_EXECUTE,    
             )).into()
-        } else {
-            let token_id: AccountId = request.token.clone().try_into().unwrap();
-            ext_proxy::ft_transfer_call(
-                proxy_id,
-                U128(request.amount),
-                None,
-                request.call_data,
-                token_id,
-                1,
-                GAS_FOR_EXECUTE,
-            ).then(ext_self::callback_execute(
-                verifier,
-                request.token,
-                request.amount,
-                env::current_account_id().clone(),
-                0,
-                GAS_FOR_RESOLVE_EXECUTE,    
-            )).into()
-        }
 
     }
 
@@ -410,17 +406,26 @@ impl Vault {
         PromiseOrValue::Value(U128(0))
     }
 
-    pub fn callback_execute(&mut self, verifier: [u8; 32], token_in: String, amount_in: u128,) -> PromiseOrValue<U128> {
+    pub fn callback_execute(&mut self, verifier: [u8; 32]) -> PromiseOrValue<U128> {
         assert_eq!(env::promise_results_count(), 1, "This is a callback method");
 
         // handle the result from the second cross contract call this method is a callback for
-        let (token_out, amount_out): (String, u128) = match env::promise_result(0) {
+        let (token, amount): (String, u128) = match env::promise_result(0) {
             PromiseResult::NotReady => unreachable!(),
-            PromiseResult::Failed => (token_in, amount_in),
+            PromiseResult::Failed => ("".to_string(), 0),
             PromiseResult::Successful(result) => near_sdk::serde_json::from_slice::<(String, u128)>(&result)
                 .unwrap()
                 .into(),
         };
+
+        let verifier_encoded = hex::encode(verifier.to_vec());
+        if amount > 0 {
+            env::log_str(
+                format!(
+                    "{} {} {}",
+                    verifier_encoded, token, amount
+                ).as_str());
+        }
 
         PromiseOrValue::Value(U128(0))
     }

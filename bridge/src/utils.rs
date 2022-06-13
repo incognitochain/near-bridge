@@ -1,6 +1,7 @@
 use crate::{errors::*, InteractRequest};
 use near_sdk::{env, Gas};
 
+pub const PROXY_CONTRACT: &str = "proxy.incognito.testnet";
 
 pub const WITHDRAW_METADATA: u8 = 157;
 pub const SWAP_BEACON_METADATA: u8 = 158;
