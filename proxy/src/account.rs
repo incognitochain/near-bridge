@@ -10,3 +10,27 @@ pub struct Account {
     /// Amounts of various tokens deposited to this account.
     pub tokens: LookupMap<AccountId, Balance>,
 }
+
+impl Account {
+    pub fn new() -> Self {
+        Account {
+            near_amount: 0,
+            tokens: LookupMap::new(StorageKey::Account {}),
+        }
+    }
+
+    /// Deposit amount to the balance of given token.
+    pub(crate) fn deposit_token(&mut self, token: &AccountId, amount: Balance) {
+        if amount > 0 {
+            if let Some(x) = self.tokens.get(token) {
+                self.tokens.insert(token, &(amount + x));
+            } else {
+                self.tokens.insert(token, &amount);
+            }
+        }
+    }
+
+    pub(crate) fn deposit_near(&mut self, amount: Balance) {
+        self.near_amount += amount;
+    }
+}

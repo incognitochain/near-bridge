@@ -1,13 +1,19 @@
 use near_contract_standards::fungible_token::receiver::FungibleTokenReceiver;
-use near_sdk::serde::{Deserialize, Serialize};
-use near_sdk::{serde_json, env, PromiseOrValue, Gas};
-use near_sdk::AccountId;
 use near_sdk::json_types::U128;
-
-use crate::utils::{WRAP_NEAR_ACCOUNT, REF_FINANCE_ACCOUNT};
+use near_sdk::serde::{Deserialize, Serialize};
+use near_sdk::AccountId;
+use near_sdk::{env, serde_json, PromiseOrValue};
 
 use crate::errors::*;
 use crate::*;
+
+/// Message parameters to receive via token function call.
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(crate = "near_sdk::serde")]
+#[serde(untagged)]
+enum TokenReceiverMessage {
+    Deposit { account_id: AccountId },
+}
 
 #[near_bindgen]
 impl FungibleTokenReceiver for Proxy {
@@ -16,24 +22,22 @@ impl FungibleTokenReceiver for Proxy {
     #[allow(unreachable_code)]
     fn ft_on_transfer(
         &mut self,
-        _sender_id: AccountId,
+        sender_id: AccountId,
         amount: U128,
         msg: String,
     ) -> PromiseOrValue<U128> {
         let token_in = env::predecessor_account_id();
+        let amount = amount.0;
         if msg.is_empty() {
-            panic!("{}", INVALID_MESSAGE)
-        }
-        // shield request
-        let message =
-            serde_json::from_str::<TokenReceiverMessage>(&msg).expect(ERR28_WRONG_MSG_FORMAT);
-        match message {
-            TokenReceiverMessage::DappRequest { dapp_account, payload } => {
-                let amount = amount.0;
-                if dapp_account == REF_FINANCE_ACCOUNT {
+            self.internal_deposit_token(&sender_id, &token_in, amount.into());
+            PromiseOrValue::Value(U128(0))
+        } else {
+            let message =
+                serde_json::from_str::<TokenReceiverMessage>(&msg).expect(ERR28_WRONG_MSG_FORMAT);
+            match message {
+                TokenReceiverMessage::Deposit { account_id } => {
+                    self.internal_deposit_token(&account_id, &token_in, amount.into());
                     PromiseOrValue::Value(U128(0))
-                } else {
-                    panic!("{}", INVALID_MESSAGE)
                 }
             }
         }
