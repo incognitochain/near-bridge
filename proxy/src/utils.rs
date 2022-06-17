@@ -6,3 +6,6 @@ pub const REF_FINANCE_ACCOUNT: &str = "ref-finance-101.testnet";
 
 pub const GAS_FOR_WNEAR: Gas = Gas(10_000_000_000_000);
 pub const GAS_FOR_RESOLVE_WNEAR: Gas = Gas(10_000_000_000_000);
+
+pub const GAS_FOR_DEPOSIT: Gas = Gas(20_000_000_000_000);
+pub const GAS_FOR_RESOLVE_DEPOSIT: Gas = Gas(20_000_000_000_000);

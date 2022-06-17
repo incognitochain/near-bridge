@@ -102,7 +102,7 @@ pub trait FtContract {
 pub trait ProxyContract {
     fn deposit_near(&mut self, account_id: AccountId, wrap: bool);
     fn call_dapp(&mut self, account_id: AccountId, msg: String) -> (String, U128);
-    fn withdraw(&mut self, token_id: String, amount: U128, account_id: AccountId) -> U128;
+    fn withdraw(&mut self, token_id: String, amount: U128, account_id: AccountId, incognito_address: String) -> U128;
 }
 
 // define methods we'll use as callbacks on ContractA
@@ -372,25 +372,11 @@ impl Vault {
             request.token.clone(),
             U128(request.amount),
             verifier_id,
+            request.incognito_address,
             proxy_id,
             0,
             GAS_FOR_WITHDRAW,
-        ).then(ext_ft::ft_balance_of(
-            env::current_account_id().clone(),
-            token_id.clone(),
-            0,
-            GAS_FOR_RETRIEVE_INFO,         // gas to attach
-        )).and(ext_ft::ft_metadata(
-            token_id.clone(),
-            0,
-            GAS_FOR_RETRIEVE_INFO,          // gas to attach
-        )).then(ext_self::callback_request_withdraw(
-            request.incognito_address,
-            token_id.clone(),
-            env::current_account_id().clone(),
-            0,
-            GAS_FOR_RESOLVE_WITHDRAW,    
-        )).into()
+        ).into()
     }
 
     /// getters
@@ -424,60 +410,6 @@ impl Vault {
             PromiseResult::NotReady => unreachable!(),
             PromiseResult::Failed => panic!("{:?}", b"Unable to make comparison"),
             PromiseResult::Successful(result) => near_sdk::serde_json::from_slice::<U128>(&result)
-                .unwrap()
-                .into(),
-        };
-
-        let mut emit_amount = amount;
-        if token_meta_data.decimals > 9 {
-            emit_amount = amount.checked_div(u128::pow(10, (token_meta_data.decimals - 9) as u32)).unwrap_or_default();
-            vault_acc_balance = vault_acc_balance.checked_div(u128::pow(10, (token_meta_data.decimals - 9) as u32)).unwrap_or_default();
-        }
-
-        if vault_acc_balance.cmp(&(u64::MAX as u128)) == Ordering::Greater {
-            panic!("{}", VALUE_EXCEEDED)
-        }
-
-        let decimals_stored = self.token_decimals.get(&token.to_string()).unwrap_or_default();
-        if decimals_stored == 0 {
-            self.token_decimals.insert(&token.to_string(), &token_meta_data.decimals);
-        }
-
-        env::log_str(
-            format!(
-                "{} {} {}",
-                incognito_address, token, emit_amount
-            ).as_str());
-
-        PromiseOrValue::Value(U128(0))
-    }
-
-    pub fn callback_request_withdraw(&mut self, incognito_address: String, token: AccountId) -> PromiseOrValue<U128> {
-        assert_eq!(env::promise_results_count(), 3, "This is a callback method");
-
-        // handle the result from the first cross contract call this method is a callback for
-        let amount: u128 = match env::promise_result(0) {
-            PromiseResult::NotReady => unreachable!(),
-            PromiseResult::Failed => panic!("{}", "Unable to execute"),
-            PromiseResult::Successful(result) => near_sdk::serde_json::from_slice::<U128>(&result)
-                .unwrap()
-                .into(),
-        };
-
-        // handle the result from the second cross contract call this method is a callback for
-        let mut vault_acc_balance: u128 = match env::promise_result(1) {
-            PromiseResult::NotReady => unreachable!(),
-            PromiseResult::Failed => panic!("{:?}", b"Unable to make comparison"),
-            PromiseResult::Successful(result) => near_sdk::serde_json::from_slice::<U128>(&result)
-                .unwrap()
-                .into(),
-        };
-
-        // handle the result from the third cross contract call this method is a callback for
-        let token_meta_data: FungibleTokenMetadata = match env::promise_result(2) {
-            PromiseResult::NotReady => unreachable!(),
-            PromiseResult::Failed => panic!("{:?}", b"Unable to make comparison"),
-            PromiseResult::Successful(result) => near_sdk::serde_json::from_slice::<FungibleTokenMetadata>(&result)
                 .unwrap()
                 .into(),
         };

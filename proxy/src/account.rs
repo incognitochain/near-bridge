@@ -19,6 +19,10 @@ impl Account {
         }
     }
 
+    pub(crate) fn get_balance_token(&self, token_id: &AccountId) -> Balance {
+        self.tokens.get(token_id).unwrap_or(0)
+    }
+
     /// Deposit amount to the balance of given token.
     pub(crate) fn deposit_token(&mut self, token: &AccountId, amount: Balance) {
         if amount > 0 {
@@ -26,6 +30,21 @@ impl Account {
                 self.tokens.insert(token, &(amount + x));
             } else {
                 self.tokens.insert(token, &amount);
+            }
+        }
+    }
+
+    /// Deposit amount to the balance of given token.
+    pub(crate) fn withdraw_token(&mut self, token: &AccountId, amount: Balance) {
+        if amount > 0 {
+            if let Some(x) = self.tokens.get(token) {
+                if x >= amount {
+                    self.tokens.insert(token, &(x - amount));
+                } else {
+                    panic!("Insufficient balance");
+                }
+            } else {
+                panic!("Insufficient balance");
             }
         }
     }
