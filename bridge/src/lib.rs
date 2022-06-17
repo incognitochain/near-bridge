@@ -19,7 +19,7 @@ use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::collections::{LookupMap, TreeMap};
 use crate::errors::*;
 use crate::utils::{PROXY_CONTRACT, NEAR_ADDRESS, WITHDRAW_INST_LEN, SWAP_COMMITTEE_INST_LEN, WITHDRAW_METADATA, SWAP_BEACON_METADATA, BURN_METADATA};
-use crate::utils::{GAS_FOR_FT_TRANSFER, GAS_FOR_EXECUTE, GAS_FOR_RESOLVE_EXECUTE};
+use crate::utils::{GAS_FOR_RETRIEVE_INFO, GAS_FOR_FT_TRANSFER, GAS_FOR_EXECUTE, GAS_FOR_RESOLVE_EXECUTE, GAS_FOR_WITHDRAW, GAS_FOR_RESOLVE_WITHDRAW};
 use crate::utils::{verify_inst};
 use arrayref::{array_refs, array_ref};
 use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
@@ -60,6 +60,17 @@ pub struct ExecuteRequest {
     pub v: u8,
 }
 
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "near_sdk::serde")]
+pub struct WithdrawRequest {
+    pub incognito_address: String,
+    pub token: String,
+    pub amount: u128,
+    pub timestamp: u128,
+    pub signature: String,
+    pub v: u8,
+}
+
 #[derive(BorshStorageKey, BorshSerialize)]
 pub(crate) enum StorageKey {
     Transaction,
@@ -90,8 +101,8 @@ pub trait FtContract {
 #[ext_contract(ext_proxy)]
 pub trait ProxyContract {
     fn deposit_near(&mut self, account_id: AccountId, wrap: bool);
-    fn call_dapp(&mut self, msg: String) -> (String, U128);
-    fn withdraw(&mut self, token_id: String, amount: U128, receiver_id: AccountId) -> U128;
+    fn call_dapp(&mut self, account_id: AccountId, msg: String) -> (String, U128);
+    fn withdraw(&mut self, token_id: String, amount: U128, account_id: AccountId) -> U128;
 }
 
 // define methods we'll use as callbacks on ContractA
@@ -103,9 +114,10 @@ pub trait VaultContract {
         token: AccountId,
         amount: u128,
     );
-    fn callback_execute(
+    fn callback_request_withdraw(
         &self,
-        verifier: [u8; 32],
+        incognito_address: String,
+        token: AccountId,
     );
 }
 
@@ -330,21 +342,55 @@ impl Vault {
     ) -> Promise {
         // TODO: verify_sign_data(request);
         let verifier: [u8; 32];
+        let verifier_str = hex::encode(verifier);
+        let verifier_id: AccountId = verifier_str.try_into().unwrap();
 
         let proxy_id: AccountId = PROXY_CONTRACT.to_string().try_into().unwrap();
 
         ext_proxy::call_dapp(
-                request.call_data,
-                proxy_id,
-                request.amount,
-                GAS_FOR_EXECUTE,
-            ).then(ext_self::callback_execute(
-                verifier,
-                env::current_account_id().clone(),
-                0,
-                GAS_FOR_RESOLVE_EXECUTE,    
-            )).into()
+            verifier_id,
+            request.call_data,
+            proxy_id,
+            request.amount,
+            GAS_FOR_EXECUTE,
+        ).into()
+    }
 
+    pub fn request_withdraw(
+        &mut self,
+        request: WithdrawRequest,
+    ) -> Promise {
+        // TODO: verify_sign_data(request);
+        let verifier: [u8; 32];
+        let verifier_str = hex::encode(verifier);
+        let verifier_id: AccountId = verifier_str.try_into().unwrap();
+
+        let proxy_id: AccountId = PROXY_CONTRACT.to_string().try_into().unwrap();
+        let token_id: AccountId = request.token.clone().try_into().unwrap();
+
+        ext_proxy::withdraw(
+            request.token.clone(),
+            U128(request.amount),
+            verifier_id,
+            proxy_id,
+            0,
+            GAS_FOR_WITHDRAW,
+        ).then(ext_ft::ft_balance_of(
+            env::current_account_id().clone(),
+            token_id.clone(),
+            0,
+            GAS_FOR_RETRIEVE_INFO,         // gas to attach
+        )).and(ext_ft::ft_metadata(
+            token_id.clone(),
+            0,
+            GAS_FOR_RETRIEVE_INFO,          // gas to attach
+        )).then(ext_self::callback_request_withdraw(
+            request.incognito_address,
+            token_id.clone(),
+            env::current_account_id().clone(),
+            0,
+            GAS_FOR_RESOLVE_WITHDRAW,    
+        )).into()
     }
 
     /// getters
@@ -406,26 +452,56 @@ impl Vault {
         PromiseOrValue::Value(U128(0))
     }
 
-    pub fn callback_execute(&mut self, verifier: [u8; 32]) -> PromiseOrValue<U128> {
-        assert_eq!(env::promise_results_count(), 1, "This is a callback method");
+    pub fn callback_request_withdraw(&mut self, incognito_address: String, token: AccountId) -> PromiseOrValue<U128> {
+        assert_eq!(env::promise_results_count(), 3, "This is a callback method");
 
-        // handle the result from the second cross contract call this method is a callback for
-        let (token, amount): (String, u128) = match env::promise_result(0) {
+        // handle the result from the first cross contract call this method is a callback for
+        let amount: u128 = match env::promise_result(0) {
             PromiseResult::NotReady => unreachable!(),
-            PromiseResult::Failed => ("".to_string(), 0),
-            PromiseResult::Successful(result) => near_sdk::serde_json::from_slice::<(String, u128)>(&result)
+            PromiseResult::Failed => panic!("{}", "Unable to execute"),
+            PromiseResult::Successful(result) => near_sdk::serde_json::from_slice::<U128>(&result)
                 .unwrap()
                 .into(),
         };
 
-        let verifier_encoded = hex::encode(verifier.to_vec());
-        if amount > 0 {
-            env::log_str(
-                format!(
-                    "{} {} {}",
-                    verifier_encoded, token, amount
-                ).as_str());
+        // handle the result from the second cross contract call this method is a callback for
+        let mut vault_acc_balance: u128 = match env::promise_result(1) {
+            PromiseResult::NotReady => unreachable!(),
+            PromiseResult::Failed => panic!("{:?}", b"Unable to make comparison"),
+            PromiseResult::Successful(result) => near_sdk::serde_json::from_slice::<U128>(&result)
+                .unwrap()
+                .into(),
+        };
+
+        // handle the result from the third cross contract call this method is a callback for
+        let token_meta_data: FungibleTokenMetadata = match env::promise_result(2) {
+            PromiseResult::NotReady => unreachable!(),
+            PromiseResult::Failed => panic!("{:?}", b"Unable to make comparison"),
+            PromiseResult::Successful(result) => near_sdk::serde_json::from_slice::<FungibleTokenMetadata>(&result)
+                .unwrap()
+                .into(),
+        };
+
+        let mut emit_amount = amount;
+        if token_meta_data.decimals > 9 {
+            emit_amount = amount.checked_div(u128::pow(10, (token_meta_data.decimals - 9) as u32)).unwrap_or_default();
+            vault_acc_balance = vault_acc_balance.checked_div(u128::pow(10, (token_meta_data.decimals - 9) as u32)).unwrap_or_default();
         }
+
+        if vault_acc_balance.cmp(&(u64::MAX as u128)) == Ordering::Greater {
+            panic!("{}", VALUE_EXCEEDED)
+        }
+
+        let decimals_stored = self.token_decimals.get(&token.to_string()).unwrap_or_default();
+        if decimals_stored == 0 {
+            self.token_decimals.insert(&token.to_string(), &token_meta_data.decimals);
+        }
+
+        env::log_str(
+            format!(
+                "{} {} {}",
+                incognito_address, token, emit_amount
+            ).as_str());
 
         PromiseOrValue::Value(U128(0))
     }

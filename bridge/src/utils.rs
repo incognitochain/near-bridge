@@ -16,6 +16,8 @@ pub const GAS_FOR_RESOLVE_DEPOSIT: Gas = Gas(20_000_000_000_000);
 pub const GAS_FOR_RETRIEVE_INFO: Gas = Gas(10_000_000_000_000);
 pub const GAS_FOR_EXECUTE: Gas = Gas(50_000_000_000_000);
 pub const GAS_FOR_RESOLVE_EXECUTE: Gas = Gas(20_000_000_000_000);
+pub const GAS_FOR_WITHDRAW: Gas = Gas(20_000_000_000_000);
+pub const GAS_FOR_RESOLVE_WITHDRAW: Gas = Gas(20_000_000_000_000);
 
 pub fn verify_inst(
     request_info: &InteractRequest, beacons: Vec<String>,
