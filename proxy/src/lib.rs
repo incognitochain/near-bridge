@@ -1,5 +1,6 @@
 mod account;
 mod errors;
+mod ref_finance;
 mod token_receiver;
 mod utils;
 mod w_near;
@@ -15,11 +16,15 @@ use near_sdk::{
     env, ext_contract, near_bindgen, serde_json, AccountId, Balance, BorshStorageKey,
     PanicOnDefault, Promise, PromiseOrValue, PromiseResult,
 };
+use ref_finance::SwapAction;
 use utils::WRAP_NEAR_ACCOUNT;
 
 use crate::errors::*;
+use crate::ref_finance::ext_ref_finance;
 use crate::utils::{
-    BRIDGE_CONTRACT, GAS_FOR_DEPOSIT, GAS_FOR_RESOLVE_DEPOSIT, GAS_FOR_RESOLVE_WNEAR, GAS_FOR_WNEAR,
+    BRIDGE_CONTRACT, GAS_FOR_DEPOSIT, GAS_FOR_RESOLVE_DEPOSIT, GAS_FOR_RESOLVE_SWAP_REF_FINACE,
+    GAS_FOR_RESOLVE_WITHDRAW_REF_FINACE, GAS_FOR_RESOLVE_WNEAR, GAS_FOR_SWAP_REF_FINANCE,
+    GAS_FOR_WITHDRAW_REF_FINANCE, GAS_FOR_WNEAR, REF_FINANCE_ACCOUNT,
 };
 use crate::w_near::ext_wnear;
 
@@ -28,9 +33,10 @@ use crate::w_near::ext_wnear;
 #[serde(crate = "near_sdk::serde")]
 #[serde(untagged)]
 enum DappRequest {
-    DepositRefFinance {},
-    SwapRefFinance {},
-    WithdrawRefFinace {},
+    SwapRefFinance {
+        action: SwapAction,
+        account_id: AccountId,
+    },
 }
 
 #[derive(BorshStorageKey, BorshSerialize)]
@@ -47,6 +53,13 @@ pub struct Proxy {
 #[ext_contract(ext_self)]
 pub trait ProxyContract {
     fn callback_wnear(&mut self, account_id: AccountId, amount: U128);
+    fn callback_swap_ref_finance(&mut self, action: SwapAction, verifier: AccountId);
+    fn callback_withdraw_ref_finace(
+        &mut self,
+        account_id: AccountId,
+        token: AccountId,
+        amount: U128,
+    );
     fn callback_withdraw(
         &mut self,
         account_id: AccountId,
@@ -110,15 +123,61 @@ impl Proxy {
             .into()
     }
 
-    pub fn call_dapp(&mut self, msg: String) {
+    pub fn call_dapp(&mut self, msg: String) -> Promise {
         let sender_id = env::predecessor_account_id();
         assert_eq!(sender_id.to_string(), BRIDGE_CONTRACT);
 
         let message = serde_json::from_str::<DappRequest>(&msg).expect(ERR28_WRONG_MSG_FORMAT);
         match message {
-            DappRequest::DepositRefFinance {} => {}
-            DappRequest::SwapRefFinance {} => {}
-            DappRequest::WithdrawRefFinace {} => {}
+            DappRequest::SwapRefFinance {
+                action:
+                    SwapAction {
+                        pool_id,
+                        token_in,
+                        amount_in,
+                        token_out,
+                        min_amount_out,
+                    },
+                account_id,
+            } => {
+                let ref_finance_id: AccountId = REF_FINANCE_ACCOUNT.to_string().try_into().unwrap();
+                ext_ft::ft_transfer_call(
+                    ref_finance_id.clone(),
+                    amount_in.clone().unwrap(),
+                    None,
+                    "".to_string(),
+                    token_in.clone(),
+                    1,
+                    GAS_FOR_DEPOSIT,
+                )
+                .then(ext_ref_finance::swap(
+                    vec![SwapAction {
+                        pool_id,
+                        token_in: token_in.clone(),
+                        amount_in,
+                        token_out: token_out.clone(),
+                        min_amount_out,
+                    }],
+                    Some(env::current_account_id()),
+                    ref_finance_id.clone(),
+                    1,
+                    GAS_FOR_SWAP_REF_FINANCE,
+                ))
+                .then(ext_self::callback_swap_ref_finance(
+                    SwapAction {
+                        pool_id,
+                        token_in: token_in.clone(),
+                        amount_in,
+                        token_out: token_out.clone(),
+                        min_amount_out,
+                    },
+                    account_id,
+                    env::current_account_id(),
+                    0,
+                    GAS_FOR_RESOLVE_SWAP_REF_FINACE,
+                ))
+                .into()
+            }
         }
     }
 
@@ -204,7 +263,7 @@ impl Proxy {
 
         let wnear_id: AccountId = WRAP_NEAR_ACCOUNT.to_string().try_into().unwrap();
 
-        // handle the result from the second cross contract call this method is a callback for
+        // handle the result from the first cross contract call this method is a callback for
         match env::promise_result(0) {
             PromiseResult::NotReady => unreachable!(),
             PromiseResult::Failed => panic!("{}", WNEAR_CALLBACK_FAILED),
@@ -214,6 +273,89 @@ impl Proxy {
                 PromiseOrValue::Value(U128(0))
             }
         }
+    }
+
+    pub fn callback_swap_ref_finance(
+        &mut self,
+        action: SwapAction,
+        account_id: AccountId,
+    ) -> PromiseOrValue<U128> {
+        assert_eq!(env::promise_results_count(), 2, "This is a callback method");
+
+        let deposit_success: bool = match env::promise_result(0) {
+            PromiseResult::NotReady => unreachable!(),
+            PromiseResult::Failed => false,
+            PromiseResult::Successful(_result) => true,
+        };
+
+        let swap_result: Option<U128> = match env::promise_result(1) {
+            PromiseResult::NotReady => unreachable!(),
+            PromiseResult::Failed => None,
+            PromiseResult::Successful(result) => near_sdk::serde_json::from_slice::<U128>(&result)
+                .unwrap()
+                .into(),
+        };
+
+        let ref_finance_id: AccountId = REF_FINANCE_ACCOUNT.to_string().try_into().unwrap();
+
+        if !deposit_success || swap_result.is_none() {
+            if deposit_success {
+                ext_ref_finance::withdraw(
+                    action.token_in.clone(),
+                    action.amount_in.unwrap(),
+                    None,
+                    ref_finance_id,
+                    1,
+                    GAS_FOR_WITHDRAW_REF_FINANCE,
+                )
+                .then(ext_self::callback_withdraw_ref_finace(
+                    account_id,
+                    action.token_in.clone(),
+                    action.amount_in.unwrap(),
+                    env::current_account_id(),
+                    0,
+                    GAS_FOR_RESOLVE_WITHDRAW_REF_FINACE,
+                ))
+                .into()
+            } else {
+                PromiseOrValue::Value(U128(0))
+            }
+        } else {
+            ext_ref_finance::withdraw(
+                action.token_out.clone(),
+                swap_result.unwrap(),
+                None,
+                ref_finance_id,
+                1,
+                GAS_FOR_WITHDRAW_REF_FINANCE,
+            )
+            .then(ext_self::callback_withdraw_ref_finace(
+                account_id,
+                action.token_out.clone(),
+                swap_result.unwrap(),
+                env::current_account_id(),
+                0,
+                GAS_FOR_RESOLVE_WITHDRAW_REF_FINACE,
+            ))
+            .into()
+        }
+    }
+
+    pub fn callback_withdraw_ref_finace(
+        &mut self,
+        account_id: AccountId,
+        token_id: AccountId,
+        amount: U128,
+    ) {
+        assert_eq!(env::promise_results_count(), 1, "This is a callback method");
+
+        match env::promise_result(0) {
+            PromiseResult::NotReady => unreachable!(),
+            PromiseResult::Failed => panic!("{}", WITHDRAW_REF_FINANCE_CALLBACK_FAILED),
+            PromiseResult::Successful(_result) => {
+                self.internal_deposit_token(&account_id, &token_id, amount.into());
+            }
+        };
     }
 
     pub fn callback_withdraw(
