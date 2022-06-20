@@ -466,4 +466,17 @@ mod tests {
         let msg_str = serde_json::to_string(&msg_obj).unwrap();
         println!("{}", msg_str);
     }
+
+    #[test]
+    fn test_serialize_withdraw_request() {
+        let request = WithdrawRequest {
+            incognito_address: "12svfkP6w5UDJDSCwqH978PvqiqBxKmUnA9em9yAYWYJVRv7wuXY1qhhYpPAm4BDz2mLbFrRmdK3yRhnTqJCZXKHUmoi7NV83HCH2YFpctHNaDdkSiQshsjw2UFUuwdEvcidgaKmF3VJpY5f8RdN".as_str(),
+            token: "cuongcute.testnet".as_str(),
+            timestamp: 123,
+            amount: 1000_000_000,
+        };
+
+        let result = extract_verifier("6801dc29a7d1784f57c511369f84d68f04630bc7afcaa2b92c03272af26430fb7b93aaae22ce4f44818acb3345db276252ef71c7442cf1fe94d1d230191208cb", 1, &request);
+        print!("{:?}", result);
+    }
 }

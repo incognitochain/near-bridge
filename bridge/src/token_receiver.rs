@@ -1,5 +1,5 @@
 use near_contract_standards::fungible_token::receiver::FungibleTokenReceiver;
-use near_sdk::serde::{Deserialize, Serialize};
+use near_sdk::serde::{Serialize};
 use near_sdk::{serde_json, env, PromiseOrValue, Gas};
 use near_sdk::AccountId;
 use near_sdk::json_types::U128;

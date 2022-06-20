@@ -1,6 +1,7 @@
 use crate::{errors::*, InteractRequest};
 use near_sdk::{env, Gas};
-use near_sdk::serde::{Deserialize, Serialize};
+use near_sdk::serde::{Serialize};
+use near_sdk::{serde_json};
 
 pub const PROXY_CONTRACT: &str = "proxy.incognito.testnet";
 
@@ -108,15 +109,14 @@ fn instruction_in_merkle_tree(
 }
 
 /// get signer from signature
-pub fn extract_verifier<T: Serialize>(_s_r: String, v: u8, request: T) -> [u8; 64] {
+pub fn extract_verifier<T: Serialize>(_s_r: String, v: u8, request: T) -> [u8; 20] {
     let serialized = serde_json::to_string(&request).unwrap();
-    let data = env::keccak256(serialized.as_slice());
-    let s_r: [u8; 64] = <[u8; 64]>::try_from(hex::decode(burn_info.inst).
-        unwrap_or_default().as_slice());
+    let data = env::keccak256(serialized.as_bytes());
+    let s_r = hex::decode(_s_r).unwrap_or_default().as_slice();
     env::ripemd160_array(
         env::ecrecover(
             &data,
-            s_r.as_slice(),
+            s_r,
             v,
             false,
         ).unwrap().as_slice()
