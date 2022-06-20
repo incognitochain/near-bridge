@@ -20,7 +20,7 @@ use near_sdk::collections::{LookupMap, TreeMap};
 use crate::errors::*;
 use crate::utils::{PROXY_CONTRACT, NEAR_ADDRESS, WITHDRAW_INST_LEN, SWAP_COMMITTEE_INST_LEN, WITHDRAW_METADATA, SWAP_BEACON_METADATA, BURN_METADATA};
 use crate::utils::{GAS_FOR_RETRIEVE_INFO, GAS_FOR_FT_TRANSFER, GAS_FOR_EXECUTE, GAS_FOR_RESOLVE_EXECUTE, GAS_FOR_WITHDRAW, GAS_FOR_RESOLVE_WITHDRAW};
-use crate::utils::{verify_inst};
+use crate::utils::{verify_inst, extract_verifier};
 use arrayref::{array_refs, array_ref};
 use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
 use near_sdk::json_types::U128;
@@ -56,8 +56,6 @@ pub struct ExecuteRequest {
     pub amount: u128,
     pub timestamp: u128,
     pub call_data: String,
-    pub signature: String,
-    pub v: u8,
 }
 
 #[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug, Clone)]
@@ -67,8 +65,6 @@ pub struct WithdrawRequest {
     pub token: String,
     pub amount: u128,
     pub timestamp: u128,
-    pub signature: String,
-    pub v: u8,
 }
 
 #[derive(BorshStorageKey, BorshSerialize)]
@@ -339,12 +335,12 @@ impl Vault {
     pub fn execute(
         &mut self,
         request: ExecuteRequest,
+        signature: String,
+        v: u8,
     ) -> Promise {
-        // TODO: verify_sign_data(request);
-        let verifier: [u8; 32];
-        let verifier_str = hex::encode(verifier);
+        env::ripemd160_array()
+        let verifier_str = hex::encode(extract_verifier(signature, v, &request));
         let verifier_id: AccountId = verifier_str.try_into().unwrap();
-
         let proxy_id: AccountId = PROXY_CONTRACT.to_string().try_into().unwrap();
 
         ext_proxy::call_dapp(
@@ -359,10 +355,10 @@ impl Vault {
     pub fn request_withdraw(
         &mut self,
         request: WithdrawRequest,
+        signature: String,
+        v: u8,
     ) -> Promise {
-        // TODO: verify_sign_data(request);
-        let verifier: [u8; 32];
-        let verifier_str = hex::encode(verifier);
+        let verifier_str = hex::encode(extract_verifier(signature, v, &request));
         let verifier_id: AccountId = verifier_str.try_into().unwrap();
 
         let proxy_id: AccountId = PROXY_CONTRACT.to_string().try_into().unwrap();
