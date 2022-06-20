@@ -98,7 +98,7 @@ impl Proxy {
     pub fn new() -> Self {
         assert!(!env::state_exists(), "Already initialized");
 
-        let mut this = Self {
+        let this = Self {
             accounts: LookupMap::new(StorageKey::Account),
         };
 
@@ -140,6 +140,12 @@ impl Proxy {
                     },
                 account_id,
             } => {
+                self.internal_withdraw_token(
+                    &account_id,
+                    &token_in.clone(),
+                    amount_in.clone().unwrap().into(),
+                );
+
                 let ref_finance_id: AccountId = REF_FINANCE_ACCOUNT.to_string().try_into().unwrap();
                 ext_ft::ft_transfer_call(
                     ref_finance_id.clone(),
@@ -384,6 +390,12 @@ impl Proxy {
             }
             PromiseResult::Successful(_result) => {}
         };
+    }
+
+    /// getters
+    
+    pub fn get_balance_token(&self, account_id: &AccountId, token_id: &AccountId) -> Balance {
+        return self.internal_get_balance_token(account_id, token_id);
     }
 }
 
