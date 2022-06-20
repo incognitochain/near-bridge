@@ -338,7 +338,6 @@ impl Vault {
         signature: String,
         v: u8,
     ) -> Promise {
-        env::ripemd160_array()
         let verifier_str = hex::encode(extract_verifier(signature, v, &request));
         let verifier_id: AccountId = verifier_str.try_into().unwrap();
         let proxy_id: AccountId = PROXY_CONTRACT.to_string().try_into().unwrap();
