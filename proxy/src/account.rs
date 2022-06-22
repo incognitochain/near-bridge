@@ -15,7 +15,7 @@ impl Account {
     pub fn new() -> Self {
         Account {
             near_amount: 0,
-            tokens: LookupMap::new(StorageKey::Account {}),
+            tokens: LookupMap::new(StorageKey::Token {}),
         }
     }
 

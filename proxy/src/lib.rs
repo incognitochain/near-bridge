@@ -42,6 +42,7 @@ enum DappRequest {
 #[derive(BorshStorageKey, BorshSerialize)]
 pub(crate) enum StorageKey {
     Account,
+    Token,
 }
 
 #[near_bindgen]
@@ -106,13 +107,15 @@ impl Proxy {
     }
 
     #[payable]
-    pub fn deposit_near(&mut self, account_id: AccountId, _wrap: bool) -> Promise {
+    pub fn deposit_near(&mut self, account_id: AccountId, wrap: bool) -> Promise {
         let amount = env::attached_deposit();
         assert!(amount > 0, "Requires positive attached deposit");
 
         // ! Storage deposit first to all registed contracts.
 
-        ext_wnear::near_deposit(account_id.clone(), amount, GAS_FOR_WNEAR)
+        let wnear_id: AccountId = WRAP_NEAR_ACCOUNT.to_string().try_into().unwrap();
+
+        ext_wnear::near_deposit(wnear_id, amount, GAS_FOR_WNEAR)
             .then(ext_self::callback_wnear(
                 account_id.clone(),
                 U128(amount),
@@ -385,10 +388,13 @@ impl Proxy {
         match env::promise_result(num_promise - 1) {
             PromiseResult::NotReady => unreachable!(),
             PromiseResult::Failed => {
+                env::log_str(format!("WithdrawFailed {} {} {}", account_id, token_id, u128::from(amount)).as_str());
                 self.internal_deposit_token(&account_id, &token_id, amount.into());
                 return;
             }
-            PromiseResult::Successful(_result) => {}
+            PromiseResult::Successful(_result) => {
+                env::log_str(format!("WithdrawSuccess {} {} {}", account_id, token_id, u128::from(amount)).as_str());
+            }
         };
     }
 

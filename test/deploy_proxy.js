@@ -12,7 +12,7 @@ const PRIVATE_KEY =
     "eAcwDR12Fxyi4pRad7L1jgc4M7x8oJpmK6R3NkgQaDu2abVNm14fmeKT5kqvxS1T8FgCRDLWmjVQpKmcetDSZ5E";
 // creates a public / private key pair using the provided private key
 const keyPair = KeyPair.fromString(PRIVATE_KEY);
-console.log({keyPair});
+console.log({ keyPair });
 const { connect } = nearAPI;
 
 (async () => {
@@ -30,7 +30,7 @@ const { connect } = nearAPI;
     };
     const near = await connect(config);
     const account = await near.account(testAddress);
-    console.log({testAddress});
+    console.log({ testAddress });
     // const account = await near.account("incognito.bridge.testnet");
     // await account.createAccount(
     //     "example-account2.testnet", // new account name
@@ -39,28 +39,53 @@ const { connect } = nearAPI;
     // );
 
     let balance = await account.getAccountBalance();
-    console.log({balance});
+    console.log({ balance });
 
     const response = await account.deployContract(fs.readFileSync('../target/wasm32-unknown-unknown/release/proxy.wasm'));
     console.log(response);
 
-    const contract = new nearAPI.Contract(
-        account, // the account object that is connecting
-        testAddress,
-        {
-            // name of contract you're connecting to
-            changeMethods: ["new"], // change methods modify state
-            sender: account, // account object to initialize and sign transactions.
-        }
-    );
+    // const contract = new nearAPI.Contract(
+    //     account, // the account object that is connecting
+    //     testAddress,
+    //     {
+    //         // name of contract you're connecting to
+    //         changeMethods: ["new"], // change methods modify state
+    //         sender: account, // account object to initialize and sign transactions.
+    //     }
+    // );
 
-    // init bridge contract
-    await contract.new(
-        {
-            args: {},
-            gas: "300000000000000",
-            amount: "0"
-        },
-    );
+    // // init bridge contract
+    // await contract.new(
+    //     {
+    //         args: {},
+    //         gas: "300000000000000",
+    //         amount: "0"
+    //     },
+    // );
 
+    // storage deposit
+    // const contractIdList = ["wrap.testnet", "ref-finance-101.testnet"];
+    // console.log(contractIdList);
+
+
+    // for (const contractId of contractIdList) {
+    //     const contract = new nearAPI.Contract(
+    //         account, // account object
+    //         contractId,
+    //         {
+    //             changeMethods: ["storage_deposit"],
+    //             sender: account,
+    //         }
+    //     );
+
+    //     // register account id
+    //     await contract.storage_deposit(
+    //         {
+    //             account_id: testAddress,
+    //             registration_only: true,
+    //         },
+    //         "300000000000000",
+    //         "130000000000000000000000"
+    //     );
+    // }
 })();
