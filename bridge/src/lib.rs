@@ -11,15 +11,14 @@ mod utils;
 
 use std::str;
 use std::cmp::Ordering;
-use std::convert::{TryFrom, TryInto};
-use near_sdk::{serde_json};
+use std::convert::{TryInto};
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
-use near_sdk::{env, near_bindgen, BorshStorageKey, PanicOnDefault, ext_contract, PromiseResult, AccountId, Gas, Promise, PromiseOrValue};
+use near_sdk::{env, near_bindgen, BorshStorageKey, PanicOnDefault, ext_contract, PromiseResult, AccountId, Promise, PromiseOrValue};
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::collections::{LookupMap, TreeMap};
 use crate::errors::*;
 use crate::utils::{PROXY_CONTRACT, NEAR_ADDRESS, WITHDRAW_INST_LEN, SWAP_COMMITTEE_INST_LEN, WITHDRAW_METADATA, SWAP_BEACON_METADATA, BURN_METADATA};
-use crate::utils::{GAS_FOR_RETRIEVE_INFO, GAS_FOR_FT_TRANSFER, GAS_FOR_EXECUTE, GAS_FOR_RESOLVE_EXECUTE, GAS_FOR_WITHDRAW, GAS_FOR_RESOLVE_WITHDRAW};
+use crate::utils::{GAS_FOR_FT_TRANSFER, GAS_FOR_EXECUTE, GAS_FOR_WITHDRAW};
 use crate::utils::{verify_inst, extract_verifier};
 use arrayref::{array_refs, array_ref};
 use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
@@ -437,6 +436,7 @@ impl Vault {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
+    use near_sdk::{serde_json};
 
     fn to_32_bytes(hex_str: &str) -> [u8; 32] {
         let bytes = hex::decode(hex_str).unwrap();
@@ -470,13 +470,14 @@ mod tests {
     #[test]
     fn test_serialize_withdraw_request() {
         let request = WithdrawRequest {
-            incognito_address: "12svfkP6w5UDJDSCwqH978PvqiqBxKmUnA9em9yAYWYJVRv7wuXY1qhhYpPAm4BDz2mLbFrRmdK3yRhnTqJCZXKHUmoi7NV83HCH2YFpctHNaDdkSiQshsjw2UFUuwdEvcidgaKmF3VJpY5f8RdN".as_str(),
-            token: "cuongcute.testnet".as_str(),
+            incognito_address: "12svfkP6w5UDJDSCwqH978PvqiqBxKmUnA9em9yAYWYJVRv7wuXY1qhhYpPAm4BDz2mLbFrRmdK3yRhnTqJCZXKHUmoi7NV83HCH2YFpctHNaDdkSiQshsjw2UFUuwdEvcidgaKmF3VJpY5f8RdN".to_string(),
+            token: "cuongcute.testnet".to_string(),
             timestamp: 123,
             amount: 1000_000_000,
         };
 
-        let result = extract_verifier("6801dc29a7d1784f57c511369f84d68f04630bc7afcaa2b92c03272af26430fb7b93aaae22ce4f44818acb3345db276252ef71c7442cf1fe94d1d230191208cb", 1, &request);
+        let result = extract_verifier("6801dc29a7d1784f57c511369f84d68f04630bc7afcaa2b92c03272af26430fb7b93aaae22ce4f44818acb3345db276252ef71c7442cf1fe94d1d230191208cb".to_string()
+                                      , 1, &request);
         print!("{:?}", result);
     }
 }
