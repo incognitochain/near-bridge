@@ -101,8 +101,8 @@ pub trait ProxyContract {
 }
 
 // define methods we'll use as callbacks on ContractA
-#[ext_contract(ext_self)]
-pub trait VaultContract {
+#[ext_contract(this_contract)]
+pub trait Callbacks {
     fn callback_deposit(
         &self,
         incognito_address: String,
@@ -208,14 +208,14 @@ impl Vault {
                 unshield_amount = unshield_amount.checked_mul(u128::pow(10, decimals as u32 - 9)).unwrap()
             }
             let token: AccountId = token.try_into().unwrap();
-            ext_ft::ft_transfer(
-                account,
-                U128(unshield_amount),
-                None,
-                token,
-                1,
-                GAS_FOR_FT_TRANSFER,
-            ).into()
+            ext_ft::ext(token)
+                .with_static_gas(GAS_FOR_FT_TRANSFER)
+                .with_attached_deposit(1)
+                .ft_transfer(
+                    account,
+                    U128(unshield_amount),
+                    None,
+                )
         }
     }
 
@@ -309,24 +309,23 @@ impl Vault {
         let account: AccountId = receiver_key.clone().try_into().unwrap();
         let proxy: AccountId = PROXY_CONTRACT.to_string().try_into().unwrap();
         if token == NEAR_ADDRESS {
-            ext_proxy::deposit_near(
-                account,
-                true,
-                proxy,
-                burn_amount,
-                GAS_FOR_FT_TRANSFER
-            ).into()
+            ext_proxy::ext(proxy)
+                .with_static_gas(GAS_FOR_FT_TRANSFER)
+                .with_attached_deposit(burn_amount)
+                .deposit_near(
+                    account,
+                    true,
+                ).into()
         } else {
             let token: AccountId = token.try_into().unwrap();
-            ext_ft::ft_transfer_call(
-                account,
-                U128(burn_amount),
-                None,
-                receiver_key,
-                token,
-                1,
-                GAS_FOR_FT_TRANSFER,
-            ).into()
+            ext_ft::ext(token)
+                .with_static_gas(GAS_FOR_FT_TRANSFER)
+                .ft_transfer_call(
+                    account,
+                    U128(burn_amount),
+                    None,
+                    receiver_key,
+                ).into()
         }
     }
 
@@ -337,17 +336,17 @@ impl Vault {
         signature: String,
         v: u8,
     ) -> Promise {
-        let verifier_str = hex::encode(extract_verifier(signature, v, &request));
+        let verifier_str = hex::encode(extract_verifier(signature.as_ref(), v, &request));
         let verifier_id: AccountId = verifier_str.try_into().unwrap();
         let proxy_id: AccountId = PROXY_CONTRACT.to_string().try_into().unwrap();
 
-        ext_proxy::call_dapp(
-            verifier_id,
-            request.call_data,
-            proxy_id,
-            request.amount,
-            GAS_FOR_EXECUTE,
-        ).into()
+        ext_proxy::ext(proxy_id)
+            .with_static_gas(GAS_FOR_EXECUTE)
+            .with_attached_deposit(request.amount)
+            .call_dapp(
+                verifier_id,
+                request.call_data,
+            )
     }
 
     pub fn request_withdraw(
@@ -356,21 +355,20 @@ impl Vault {
         signature: String,
         v: u8,
     ) -> Promise {
-        let verifier_str = hex::encode(extract_verifier(signature, v, &request));
+        let verifier_str = hex::encode(extract_verifier(signature.as_ref(), v, &request));
         let verifier_id: AccountId = verifier_str.try_into().unwrap();
 
         let proxy_id: AccountId = PROXY_CONTRACT.to_string().try_into().unwrap();
-        let token_id: AccountId = request.token.clone().try_into().unwrap();
+        let _token_id: AccountId = request.token.clone().try_into().unwrap();
 
-        ext_proxy::withdraw(
-            request.token.clone(),
-            U128(request.amount),
-            verifier_id,
-            request.incognito_address,
-            proxy_id,
-            0,
-            GAS_FOR_WITHDRAW,
-        ).into()
+        ext_proxy::ext(proxy_id)
+            .with_static_gas(GAS_FOR_WITHDRAW)
+            .withdraw(
+                request.token.clone(),
+                U128(request.amount),
+                verifier_id,
+                request.incognito_address,
+            )
     }
 
     /// getters
@@ -387,6 +385,7 @@ impl Vault {
     }
 
     /// callbacks
+    #[private]
     pub fn callback_deposit(&mut self, incognito_address: String, token: AccountId, amount: u128) -> PromiseOrValue<U128> {
         assert_eq!(env::promise_results_count(), 2, "This is a callback method");
 
@@ -476,7 +475,7 @@ mod tests {
             amount: 1000_000_000,
         };
 
-        let result = extract_verifier("6801dc29a7d1784f57c511369f84d68f04630bc7afcaa2b92c03272af26430fb7b93aaae22ce4f44818acb3345db276252ef71c7442cf1fe94d1d230191208cb".to_string()
+        let result = extract_verifier("6801dc29a7d1784f57c511369f84d68f04630bc7afcaa2b92c03272af26430fb7b93aaae22ce4f44818acb3345db276252ef71c7442cf1fe94d1d230191208cb"
                                       , 1, &request);
         print!("{:?}", result);
     }

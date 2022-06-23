@@ -1,6 +1,6 @@
 use near_contract_standards::fungible_token::receiver::FungibleTokenReceiver;
 use near_sdk::serde::{Serialize};
-use near_sdk::{serde_json, env, PromiseOrValue, Gas};
+use near_sdk::{serde_json, env, PromiseOrValue};
 use near_sdk::AccountId;
 use near_sdk::json_types::U128;
 
@@ -43,24 +43,24 @@ impl FungibleTokenReceiver for Vault {
                 incognito_address
             } => {
                 let amount = amount.0;
-                ext_ft::ft_metadata(
-                    token_in.clone(),
-                    0,
-                    GAS_FOR_RETRIEVE_INFO,          // gas to attach
-                ).and(ext_ft::ft_balance_of(
-                    env::current_account_id().clone(),
-                    token_in.clone(),
-                    0,
-                    GAS_FOR_RETRIEVE_INFO,         // gas to attach
-                ))
-                .then(ext_self::callback_deposit(
-                    incognito_address,
-                    token_in,
-                    amount,
-                    env::current_account_id().clone(),
-                    0,
-                    GAS_FOR_RESOLVE_DEPOSIT,          // gas to attach to the callback
-                )).into()
+                let ft_metadata_ps = ext_ft::ext(token_in.clone())
+                    .with_static_gas(GAS_FOR_RETRIEVE_INFO)
+                    .ft_metadata();
+
+                let ft_balance_of_ps = ext_ft::ext(token_in.clone())
+                    .with_static_gas(GAS_FOR_RETRIEVE_INFO)
+                    .ft_balance_of(env::current_account_id().clone());
+                ft_metadata_ps.and(
+                    ft_balance_of_ps
+                ).then(
+                    Self::ext(env::current_account_id().clone())
+                    .with_static_gas(GAS_FOR_RESOLVE_DEPOSIT)
+                    .callback_deposit(
+                        incognito_address,
+                        token_in,
+                        amount,
+                    )
+                ).into()
             }
         }
     }
