@@ -436,6 +436,7 @@ impl Vault {
 mod tests {
     use super::*;
     use near_sdk::{serde_json};
+    use ethsign::{Protected, SecretKey};
 
     fn to_32_bytes(hex_str: &str) -> [u8; 32] {
         let bytes = hex::decode(hex_str).unwrap();
@@ -475,8 +476,29 @@ mod tests {
             amount: 1000_000_000,
         };
 
-        let result = extract_verifier("6801dc29a7d1784f57c511369f84d68f04630bc7afcaa2b92c03272af26430fb7b93aaae22ce4f44818acb3345db276252ef71c7442cf1fe94d1d230191208cb"
-                                      , 1, &request);
-        print!("{:?}", result);
+        let private_key = hex::decode("2a3526dd05ad2ebba87673f711ef8c336115254ef8fcd38c4d8166db9a8120e4").unwrap();
+        let secret = SecretKey::from_raw(private_key.as_slice()).unwrap();
+        let message = serde_json::to_string(&request).unwrap();
+        let data = env::keccak256(message.as_bytes());
+
+        // Sign the message
+        let signature = secret.sign(data.as_slice()).unwrap();
+        println!("{:?}", signature);
+
+        // Recover the signer
+        let public = signature.recover(data.as_slice()).unwrap();
+        println!("{:?}", public);
+
+        // Verify the signature
+        let res = public.verify(&signature, data.as_slice()).unwrap();
+        assert!(res);
+
+        let signature_str = [signature.r, signature.s].concat();
+        let result = extract_verifier(hex::encode(signature_str.as_slice()).as_str()
+                                      , signature.v, &request);
+
+        print!("Actual {:?} \n", hex::encode(result));
+        print!("Expect {:?}", hex::encode(secret.public().address()));
+        assert_eq!(hex::encode(result), hex::encode(secret.public().address()));
     }
 }

@@ -15,6 +15,10 @@ const keyPair = KeyPair.fromString(PRIVATE_KEY);
 console.log({keyPair});
 const { connect } = nearAPI;
 
+const Web3 = require('web3');
+const secp256k1 = require('secp256k1');
+const bs58 = require('bs58');
+
 (async () => {
     const pk58 = 'ed25519:5wbGqEmJuExCVCck6FLM5FqQRyyPabmBHpHtMbkZMUy1'
     const testAddress = nearAPI.utils.PublicKey.fromString(pk58).data.hexSlice();
@@ -97,10 +101,29 @@ const { connect } = nearAPI;
         },
     );
 
+    // test generate eth private key from incognito key
+    console.log("result: ", genETHAccFromIncPrivKey("112t8rnXRDT21fsx5UYR1kGd8yjiygUS3tXfhcRfXy2nmJS3U39vkf76wbQsXguwhHwN2EtBF4YZJ8o1i7MMF9BsKngcgxfkCZBa5P3Fq9xp"));
 })();
 
 function toHexString(byteArray) {
     return Array.from(byteArray, function(byte) {
         return ('0' + (byte & 0xFF).toString(16)).slice(-2);
     }).join('')
+}
+
+function genETHAccFromIncPrivKey(incPrivKey) {
+    const web3 = new Web3();
+    let bytes = bs58.decode(incPrivKey);
+    bytes = bytes.slice(1, bytes.length - 4);
+    const privHexStr = web3.utils.bytesToHex(bytes);
+    let privKey = web3.utils.keccak256(privHexStr);
+    let temp, temp2;
+    temp = web3.utils.hexToBytes(privKey);
+    temp2 = new Uint8Array(temp);
+    while (!secp256k1.privateKeyVerify(temp2)) {
+        privKey = web3.utils.keccak256(privKey);
+        temp = web3.utils.hexToBytes(privKey);
+        temp2 = new Uint8Array(temp);
+    }
+    return privKey;
 }
