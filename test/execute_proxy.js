@@ -56,16 +56,16 @@ const { connect } = nearAPI;
     );
 
     // deposit NEAR and wrap
-    // await contract.deposit_near(
-    //     {
-    //         args: {
-    //             account_id: testAddress,
-    //             wrap: true,
-    //         },
-    //         gas: "300000000000000",
-    //         amount: "1000000000000000000000"
-    //     },
-    // );
+    await contract.deposit_near(
+        {
+            args: {
+                account_id: testAddress,
+                wrap: true,
+            },
+            gas: "300000000000000",
+            amount: "1000000000000000000000"
+        },
+    );
 
     const balance = await contract.get_balance_token({
         account_id: testAddress,
@@ -82,8 +82,22 @@ const { connect } = nearAPI;
     await contract.withdraw(
         {
             args: {
-                token_id: "wrap.testnet",
-                amount: 0,
+                token_id: "",
+                amount: 500000000000000000000,
+                account_id: testAddress,
+                incognito_address: "12svfkP6w5UDJDSCwqH978PvqiqBxKmUnA9em9yAYWYJVRv7wuXY1qhhYpPAm4BDz2mLbFrRmdK3yRhnTqJCZXKHUmoi7NV83HCH2YFpctHNaDdkSiQshsjw2UFUuwdEvcidgaKmF3VJpY5f8RdN",
+            },
+            gas: "300000000000000",
+            amount: "0"
+        }
+    );
+
+    // withdraw NEAR
+    await contract.withdraw(
+        {
+            args: {
+                token_id: "",
+                amount: 400000000000000000000,
                 account_id: testAddress,
                 incognito_address: "12svfkP6w5UDJDSCwqH978PvqiqBxKmUnA9em9yAYWYJVRv7wuXY1qhhYpPAm4BDz2mLbFrRmdK3yRhnTqJCZXKHUmoi7NV83HCH2YFpctHNaDdkSiQshsjw2UFUuwdEvcidgaKmF3VJpY5f8RdN",
             },

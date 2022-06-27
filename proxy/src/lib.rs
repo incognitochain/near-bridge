@@ -22,8 +22,8 @@ use utils::WRAP_NEAR_ACCOUNT;
 use crate::errors::*;
 use crate::ref_finance::ext_ref_finance;
 use crate::utils::{
-    BRIDGE_CONTRACT, GAS_FOR_DEPOSIT, GAS_FOR_RESOLVE_DEPOSIT, GAS_FOR_RESOLVE_SWAP_REF_FINACE,
-    GAS_FOR_RESOLVE_WITHDRAW_REF_FINACE, GAS_FOR_RESOLVE_WNEAR, GAS_FOR_SWAP_REF_FINANCE,
+    BRIDGE_CONTRACT, GAS_FOR_DEPOSIT, GAS_FOR_RESOLVE_DEPOSIT, GAS_FOR_RESOLVE_SWAP_REF_FINANCE,
+    GAS_FOR_RESOLVE_WITHDRAW_REF_FINANCE, GAS_FOR_RESOLVE_WNEAR, GAS_FOR_SWAP_REF_FINANCE,
     GAS_FOR_WITHDRAW_REF_FINANCE, GAS_FOR_WNEAR, REF_FINANCE_ACCOUNT,
 };
 use crate::w_near::ext_wnear;
@@ -55,7 +55,7 @@ pub struct Proxy {
 pub trait ProxyContract {
     fn callback_wnear(&mut self, account_id: AccountId, amount: U128);
     fn callback_swap_ref_finance(&mut self, action: SwapAction, verifier: AccountId);
-    fn callback_withdraw_ref_finace(
+    fn callback_withdraw_ref_finance(
         &mut self,
         account_id: AccountId,
         token: AccountId,
@@ -66,7 +66,6 @@ pub trait ProxyContract {
         account_id: AccountId,
         token_id: AccountId,
         amount: U128,
-        unwrap: bool,
     );
 }
 
@@ -183,7 +182,7 @@ impl Proxy {
                     account_id,
                     env::current_account_id(),
                     0,
-                    GAS_FOR_RESOLVE_SWAP_REF_FINACE,
+                    GAS_FOR_RESOLVE_SWAP_REF_FINANCE,
                 ))
                 .into()
             }
@@ -235,7 +234,6 @@ impl Proxy {
                 account_id.clone(),
                 withdraw_token_id.clone(),
                 U128(withdraw_amount),
-                false,
                 env::current_account_id(),
                 0,
                 GAS_FOR_RESOLVE_DEPOSIT,
@@ -258,7 +256,6 @@ impl Proxy {
                 account_id.clone(),
                 withdraw_token_id.clone(),
                 U128(withdraw_amount),
-                true,
                 env::current_account_id(),
                 0,
                 GAS_FOR_RESOLVE_DEPOSIT,
@@ -317,13 +314,13 @@ impl Proxy {
                     1,
                     GAS_FOR_WITHDRAW_REF_FINANCE,
                 )
-                .then(ext_self::callback_withdraw_ref_finace(
+                .then(ext_self::callback_withdraw_ref_finance(
                     account_id,
                     action.token_in.clone(),
                     action.amount_in.unwrap(),
                     env::current_account_id(),
                     0,
-                    GAS_FOR_RESOLVE_WITHDRAW_REF_FINACE,
+                    GAS_FOR_RESOLVE_WITHDRAW_REF_FINANCE,
                 ))
                 .into()
             } else {
@@ -338,19 +335,19 @@ impl Proxy {
                 1,
                 GAS_FOR_WITHDRAW_REF_FINANCE,
             )
-            .then(ext_self::callback_withdraw_ref_finace(
+            .then(ext_self::callback_withdraw_ref_finance(
                 account_id,
                 action.token_out.clone(),
                 swap_result.unwrap(),
                 env::current_account_id(),
                 0,
-                GAS_FOR_RESOLVE_WITHDRAW_REF_FINACE,
+                GAS_FOR_RESOLVE_WITHDRAW_REF_FINANCE,
             ))
             .into()
         }
     }
 
-    pub fn callback_withdraw_ref_finace(
+    pub fn callback_withdraw_ref_finance(
         &mut self,
         account_id: AccountId,
         token_id: AccountId,
@@ -372,34 +369,41 @@ impl Proxy {
         account_id: AccountId,
         token_id: AccountId,
         amount: U128,
-        unwrap: bool,
     ) {
-        let mut num_promise: u64 = 1;
-        if unwrap {
-            num_promise = 2;
-        }
-        assert_eq!(
-            env::promise_results_count(),
-            num_promise,
-            "This is a callback method"
-        );
+        assert_eq!(env::promise_results_count(), 1, "This is a callback method");
 
-        // handle the result from the last cross contract call this method is a callback for
-        match env::promise_result(num_promise - 1) {
+        // handle the result from the first cross contract call this method is a callback for
+        match env::promise_result(0) {
             PromiseResult::NotReady => unreachable!(),
             PromiseResult::Failed => {
-                env::log_str(format!("WithdrawFailed {} {} {}", account_id, token_id, u128::from(amount)).as_str());
+                env::log_str(
+                    format!(
+                        "WithdrawFailed {} {} {}",
+                        account_id,
+                        token_id,
+                        u128::from(amount)
+                    )
+                    .as_str(),
+                );
                 self.internal_deposit_token(&account_id, &token_id, amount.into());
                 return;
             }
             PromiseResult::Successful(_result) => {
-                env::log_str(format!("WithdrawSuccess {} {} {}", account_id, token_id, u128::from(amount)).as_str());
+                env::log_str(
+                    format!(
+                        "WithdrawSuccess {} {} {}",
+                        account_id,
+                        token_id,
+                        u128::from(amount)
+                    )
+                    .as_str(),
+                );
             }
         };
     }
 
     /// getters
-    
+
     pub fn get_balance_token(&self, account_id: &AccountId, token_id: &AccountId) -> Balance {
         return self.internal_get_balance_token(account_id, token_id);
     }
