@@ -82,7 +82,7 @@ const { connect } = nearAPI;
     await contract.withdraw(
         {
             args: {
-                token_id: "",
+                token_id: "wrap.testnet",
                 amount: 500000000000000000000,
                 account_id: testAddress,
                 incognito_address: "12svfkP6w5UDJDSCwqH978PvqiqBxKmUnA9em9yAYWYJVRv7wuXY1qhhYpPAm4BDz2mLbFrRmdK3yRhnTqJCZXKHUmoi7NV83HCH2YFpctHNaDdkSiQshsjw2UFUuwdEvcidgaKmF3VJpY5f8RdN",
