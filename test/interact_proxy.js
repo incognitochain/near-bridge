@@ -34,7 +34,7 @@ const { connect } = nearAPI;
     console.log({ testAddress: bridgeAddress });
 
 
-    const proxyAddress = "proxy0.incognito_chain.testnet";
+    const proxyAddress = "proxy1.incognito_chain.testnet";
 
     const contract = new nearAPI.Contract(
         account, // account object

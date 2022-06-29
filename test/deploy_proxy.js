@@ -9,14 +9,14 @@ const fs = require('fs');
 const { keyStores, KeyPair } = nearAPI;
 const keyStore = new keyStores.InMemoryKeyStore();
 const PRIVATE_KEY =
-    "eAcwDR12Fxyi4pRad7L1jgc4M7x8oJpmK6R3NkgQaDu2abVNm14fmeKT5kqvxS1T8FgCRDLWmjVQpKmcetDSZ5E";
+    "4kNNnnCt4Va5Chd38FC3yGsPZs9xhZ46QyZjLubU1GAzZE5UA2dZoW4RaVSuRL3ddU6EFBbXEWvdm5WCrZDMnwu8";
 // creates a public / private key pair using the provided private key
 const keyPair = KeyPair.fromString(PRIVATE_KEY);
 console.log({ keyPair });
 const { connect } = nearAPI;
 
 (async () => {
-    const testAddress = "proxy0.incognito_chain.testnet";
+    const testAddress = "proxy1.incognito_chain.testnet";
 
     // adds the keyPair you created to keyStore
     await keyStore.setKey("testnet", testAddress, keyPair);
@@ -63,8 +63,8 @@ const { connect } = nearAPI;
     //     },
     // );
 
-    // storage deposit
-    // const contractIdList = ["wrap.testnet", "ref-finance-101.testnet"];
+    // // storage deposit
+    // const contractIdList = ["wrap.testnet", "ref-finance-101.testnet", "usdc.fakes.testnet"];
     // console.log(contractIdList);
 
 

@@ -5,7 +5,7 @@ use near_sdk::AccountId;
 use crate::*;
 
 /// Single swap action.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(crate = "near_sdk::serde")]
 pub struct SwapAction {
     /// Pool which should be used for swapping.

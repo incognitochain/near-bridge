@@ -9,7 +9,7 @@ use std::convert::TryInto;
 
 use account::Account;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
-use near_sdk::collections::LookupMap;
+use near_sdk::collections::{LookupMap, UnorderedSet};
 use near_sdk::json_types::U128;
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::{
@@ -22,9 +22,9 @@ use utils::WRAP_NEAR_ACCOUNT;
 use crate::errors::*;
 use crate::ref_finance::ext_ref_finance;
 use crate::utils::{
-    BRIDGE_CONTRACT, GAS_FOR_DEPOSIT, GAS_FOR_RESOLVE_DEPOSIT, GAS_FOR_RESOLVE_SWAP_REF_FINANCE,
-    GAS_FOR_RESOLVE_WITHDRAW_REF_FINANCE, GAS_FOR_RESOLVE_WNEAR, GAS_FOR_SWAP_REF_FINANCE,
-    GAS_FOR_WITHDRAW_REF_FINANCE, GAS_FOR_WNEAR, REF_FINANCE_ACCOUNT,
+    BRIDGE_CONTRACT, GAS_FOR_DEPOSIT, GAS_FOR_RESOLVE_DEPOSIT, GAS_FOR_RESOLVE_DEPOSIT_REF_FINANCE,
+    GAS_FOR_RESOLVE_SWAP_REF_FINANCE, GAS_FOR_RESOLVE_WITHDRAW_REF_FINANCE, GAS_FOR_RESOLVE_WNEAR,
+    GAS_FOR_SWAP_REF_FINANCE, GAS_FOR_WITHDRAW_REF_FINANCE, GAS_FOR_WNEAR, REF_FINANCE_ACCOUNT,
 };
 use crate::w_near::ext_wnear;
 
@@ -43,30 +43,28 @@ enum DappRequest {
 pub(crate) enum StorageKey {
     Account,
     Token,
+    Whitelist,
 }
 
 #[near_bindgen]
 #[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
 pub struct Proxy {
     accounts: LookupMap<AccountId, Account>,
+    whitelisted_tokens: UnorderedSet<AccountId>,
 }
 
 #[ext_contract(ext_self)]
 pub trait ProxyContract {
     fn callback_wnear(&mut self, account_id: AccountId, amount: U128);
-    fn callback_swap_ref_finance(&mut self, action: SwapAction, verifier: AccountId);
+    fn callback_deposit_ref_finance(&mut self, action: SwapAction, account_id: AccountId);
+    fn callback_swap_ref_finance(&mut self, action: SwapAction, account_id: AccountId);
     fn callback_withdraw_ref_finance(
-        &mut self,
-        account_id: AccountId,
-        token: AccountId,
-        amount: U128,
-    );
-    fn callback_withdraw(
         &mut self,
         account_id: AccountId,
         token_id: AccountId,
         amount: U128,
     );
+    fn callback_withdraw(&mut self, account_id: AccountId, token_id: AccountId, amount: U128);
 }
 
 #[ext_contract(ext_ft)]
@@ -100,9 +98,34 @@ impl Proxy {
 
         let this = Self {
             accounts: LookupMap::new(StorageKey::Account),
+            whitelisted_tokens: UnorderedSet::new(StorageKey::Whitelist),
         };
 
         this
+    }
+
+    /// Extend whitelisted tokens with new tokens. Only can be called by owner.
+    pub fn extend_whitelisted_tokens(&mut self, token_ids: Vec<AccountId>) {
+        let sender_id = env::predecessor_account_id();
+        if sender_id != env::current_account_id().clone() && sender_id.to_string() != BRIDGE_CONTRACT {
+            panic!("{}", NOT_ALLOWED)
+        }
+
+        for token in token_ids {
+            self.whitelisted_tokens.insert(&token);
+        }
+    }
+
+    /// Remove whitelisted token. Only can be called by owner.
+    pub fn remove_whitelisted_tokens(&mut self, token_ids: Vec<AccountId>) {
+        let sender_id = env::predecessor_account_id();
+        if sender_id != env::current_account_id().clone() && sender_id.to_string() != BRIDGE_CONTRACT {
+            panic!("{}", NOT_ALLOWED)
+        }
+
+        for token in token_ids {
+            self.whitelisted_tokens.remove(&token);
+        }
     }
 
     #[payable]
@@ -129,7 +152,7 @@ impl Proxy {
         let sender_id = env::predecessor_account_id();
         assert_eq!(sender_id.to_string(), BRIDGE_CONTRACT);
 
-        let message = serde_json::from_str::<DappRequest>(&msg).expect(ERR28_WRONG_MSG_FORMAT);
+        let message = serde_json::from_str::<DappRequest>(&msg).expect(WRONG_MSG_FORMAT);
         match message {
             DappRequest::SwapRefFinance {
                 action:
@@ -142,6 +165,11 @@ impl Proxy {
                     },
                 account_id,
             } => {
+                if !self.whitelisted_tokens.contains(&token_in)
+                    || !self.whitelisted_tokens.contains(&token_out)
+                {
+                    panic!("{}", TOKEN_NOT_WHITELISTED)
+                }
                 self.internal_withdraw_token(
                     &account_id,
                     &token_in.clone(),
@@ -158,20 +186,7 @@ impl Proxy {
                     1,
                     GAS_FOR_DEPOSIT,
                 )
-                .then(ext_ref_finance::swap(
-                    vec![SwapAction {
-                        pool_id,
-                        token_in: token_in.clone(),
-                        amount_in,
-                        token_out: token_out.clone(),
-                        min_amount_out,
-                    }],
-                    Some(env::current_account_id()),
-                    ref_finance_id.clone(),
-                    1,
-                    GAS_FOR_SWAP_REF_FINANCE,
-                ))
-                .then(ext_self::callback_swap_ref_finance(
+                .then(ext_self::callback_deposit_ref_finance(
                     SwapAction {
                         pool_id,
                         token_in: token_in.clone(),
@@ -182,7 +197,7 @@ impl Proxy {
                     account_id,
                     env::current_account_id(),
                     0,
-                    GAS_FOR_RESOLVE_SWAP_REF_FINANCE,
+                    GAS_FOR_RESOLVE_DEPOSIT_REF_FINANCE,
                 ))
                 .into()
             }
@@ -281,20 +296,63 @@ impl Proxy {
         }
     }
 
+    pub fn callback_deposit_ref_finance(
+        &mut self,
+        action: SwapAction,
+        account_id: AccountId,
+    ) -> PromiseOrValue<U128> {
+        assert_eq!(env::promise_results_count(), 1, "This is a callback method");
+
+        let deposit_success: bool = match env::promise_result(0) {
+            PromiseResult::NotReady => unreachable!(),
+            PromiseResult::Failed => false,
+            PromiseResult::Successful(result) => {
+                let used_amount: u128 = near_sdk::serde_json::from_slice::<U128>(&result)
+                    .unwrap()
+                    .into();
+                match used_amount {
+                    0 => false,
+                    _ => true,
+                }
+            }
+        };
+
+        let ref_finance_id: AccountId = REF_FINANCE_ACCOUNT.to_string().try_into().unwrap();
+
+        if deposit_success {
+            ext_ref_finance::swap(
+                vec![action.clone()],
+                Some(env::current_account_id()),
+                ref_finance_id.clone(),
+                1,
+                GAS_FOR_SWAP_REF_FINANCE,
+            )
+            .then(ext_self::callback_swap_ref_finance(
+                action.clone(),
+                account_id,
+                env::current_account_id(),
+                0,
+                GAS_FOR_RESOLVE_SWAP_REF_FINANCE,
+            ))
+            .into()
+        } else {
+            self.internal_deposit_token(
+                &account_id,
+                &action.token_in.clone(),
+                action.amount_in.clone().unwrap().into(),
+            );
+            PromiseOrValue::Value(U128(0))
+        }
+    }
+
     pub fn callback_swap_ref_finance(
         &mut self,
         action: SwapAction,
         account_id: AccountId,
     ) -> PromiseOrValue<U128> {
-        assert_eq!(env::promise_results_count(), 2, "This is a callback method");
+        assert_eq!(env::promise_results_count(), 1, "This is a callback method");
 
-        let deposit_success: bool = match env::promise_result(0) {
-            PromiseResult::NotReady => unreachable!(),
-            PromiseResult::Failed => false,
-            PromiseResult::Successful(_result) => true,
-        };
-
-        let swap_result: Option<U128> = match env::promise_result(1) {
+        let swap_result: Option<U128> = match env::promise_result(0) {
             PromiseResult::NotReady => unreachable!(),
             PromiseResult::Failed => None,
             PromiseResult::Successful(result) => near_sdk::serde_json::from_slice::<U128>(&result)
@@ -304,28 +362,24 @@ impl Proxy {
 
         let ref_finance_id: AccountId = REF_FINANCE_ACCOUNT.to_string().try_into().unwrap();
 
-        if !deposit_success || swap_result.is_none() {
-            if deposit_success {
-                ext_ref_finance::withdraw(
-                    action.token_in.clone(),
-                    action.amount_in.unwrap(),
-                    None,
-                    ref_finance_id,
-                    1,
-                    GAS_FOR_WITHDRAW_REF_FINANCE,
-                )
-                .then(ext_self::callback_withdraw_ref_finance(
-                    account_id,
-                    action.token_in.clone(),
-                    action.amount_in.unwrap(),
-                    env::current_account_id(),
-                    0,
-                    GAS_FOR_RESOLVE_WITHDRAW_REF_FINANCE,
-                ))
-                .into()
-            } else {
-                PromiseOrValue::Value(U128(0))
-            }
+        if swap_result.is_none() {
+            ext_ref_finance::withdraw(
+                action.token_in.clone(),
+                action.amount_in.unwrap(),
+                None,
+                ref_finance_id,
+                1,
+                GAS_FOR_WITHDRAW_REF_FINANCE,
+            )
+            .then(ext_self::callback_withdraw_ref_finance(
+                account_id,
+                action.token_in.clone(),
+                action.amount_in.unwrap(),
+                env::current_account_id(),
+                0,
+                GAS_FOR_RESOLVE_WITHDRAW_REF_FINANCE,
+            ))
+            .into()
         } else {
             ext_ref_finance::withdraw(
                 action.token_out.clone(),
@@ -364,12 +418,7 @@ impl Proxy {
         };
     }
 
-    pub fn callback_withdraw(
-        &mut self,
-        account_id: AccountId,
-        token_id: AccountId,
-        amount: U128,
-    ) {
+    pub fn callback_withdraw(&mut self, account_id: AccountId, token_id: AccountId, amount: U128) {
         assert_eq!(env::promise_results_count(), 1, "This is a callback method");
 
         // handle the result from the first cross contract call this method is a callback for
@@ -406,6 +455,10 @@ impl Proxy {
 
     pub fn get_balance_token(&self, account_id: &AccountId, token_id: &AccountId) -> Balance {
         return self.internal_get_balance_token(account_id, token_id);
+    }
+
+    pub fn get_whitelisted_tokens(&self) -> Vec<AccountId> {
+        self.whitelisted_tokens.to_vec()
     }
 }
 
@@ -453,5 +506,26 @@ impl Proxy {
     pub(crate) fn internal_save_account(&mut self, account_id: &AccountId, account: Account) {
         // TODO: assert storage
         self.accounts.insert(&account_id, &account.into());
+    }
+}
+
+mod tests {
+    use super::*;
+    use near_sdk::serde_json;
+
+    #[test]
+    fn test_serialize() {
+        let msg_obj = DappRequest::SwapRefFinance {
+            action: SwapAction {
+                pool_id: 54,
+                token_in: "wrap.testnet".to_string().try_into().unwrap(),
+                amount_in: Some(U128(959043589924462274992785)),
+                token_out: "usdc.fakes.testnet".to_string().try_into().unwrap(),
+                min_amount_out: U128(1573449),
+            },
+            account_id: "cuongcute.testnet".to_string().try_into().unwrap(),
+        };
+        let msg_str = serde_json::to_string(&msg_obj).unwrap();
+        println!("{}", msg_str);
     }
 }
