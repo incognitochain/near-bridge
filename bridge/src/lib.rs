@@ -373,6 +373,42 @@ impl Vault {
         ).into()
     }
 
+    /// execute request from beacon
+    pub fn execute_with_burn_proof(
+        &mut self,
+        burn_info: InteractRequest
+    ) -> Promise {
+        let beacons = self.get_beacons(burn_info.height);
+
+        // verify instruction
+        verify_inst(&burn_info, beacons);
+
+        // parse instruction
+        let inst = hex::decode(burn_info.inst).unwrap_or_default();
+        // extract data from instruction
+        // layout: meta(1), shard(1), network(1), extToken(32), extCallAddr(32), amount(32), txID(32), recvToken(32), withdrawAddr(32), redepositAddr(101), extCalldata(*)
+        #[allow(clippy::ptr_offset_with_cast)]
+        let (
+            meta_type, shard_id, _,
+            token_len, token,
+            ext_call_addr_len, ext_call_addr,
+            _, amount, tx_id,
+            recv_token_len, recv_token,
+            withdraw_addr_len, withdraw_addr,
+            redeposit_addr, call_data
+        ) = array_refs![inst.as_slice(), 1, 1, 1, 1, 64, 1, 64, 24, 8, 32, 1, 64, 1, 64, 101, burn_info.inst.len() - 429];
+        let meta_type = u8::from_be_bytes(*meta_type);
+        let shard_id = u8::from_be_bytes(*shard_id);
+        let request_amount = u128::from(u64::from_be_bytes(*amount));
+        let token_len = u8::from_be_bytes(*token_len);
+        let receiver_len = u8::from_be_bytes(*receiver_len);
+        let token = &token[64 - token_len as usize..];
+        let token: String = String::from_utf8(token.to_vec()).unwrap_or_default();
+        let receiver_key = &receiver_key[64 - receiver_len as usize..];
+        let receiver_key: String = String::from_utf8(receiver_key.to_vec()).unwrap_or_default();
+
+    }
+
     /// getters
 
     /// get beacon list by height
