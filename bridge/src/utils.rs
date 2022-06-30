@@ -8,6 +8,8 @@ pub const PROXY_CONTRACT: &str = "proxy.incognito.testnet";
 pub const WITHDRAW_METADATA: u8 = 157;
 pub const SWAP_BEACON_METADATA: u8 = 158;
 pub const BURN_METADATA: u8 = 160;
+pub const EXECUTE_BURN_PROOF: usize = 363;
+pub const EXECUTE_BURN_PROOF_METADATA: u8 = 160;
 
 pub const NEAR_ADDRESS: &str = "0";
 pub const WITHDRAW_INST_LEN: usize = 1 + 1 + 1 + 64 + 1 + 64 + 32 + 32; // ignore last 64 bytes in instruction

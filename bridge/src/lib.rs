@@ -18,7 +18,7 @@ use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::collections::{LookupMap, TreeMap};
 use crate::errors::*;
 use crate::utils::{PROXY_CONTRACT, NEAR_ADDRESS, WITHDRAW_INST_LEN, SWAP_COMMITTEE_INST_LEN, WITHDRAW_METADATA, SWAP_BEACON_METADATA, BURN_METADATA};
-use crate::utils::{GAS_FOR_FT_TRANSFER, GAS_FOR_EXECUTE, GAS_FOR_WITHDRAW};
+use crate::utils::{GAS_FOR_FT_TRANSFER, GAS_FOR_EXECUTE, GAS_FOR_WITHDRAW, EXECUTE_BURN_PROOF, EXECUTE_BURN_PROOF_METADATA};
 use crate::utils::{verify_inst, extract_verifier};
 use arrayref::{array_refs, array_ref};
 use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
@@ -82,6 +82,8 @@ pub struct Vault {
     pub beacons: TreeMap<u128, Vec<String>>,
     // store token decimal
     pub token_decimals: LookupMap<String, u8>,
+    // index for new flow
+    pub execute_burn_proof_id: u128,
 }
 
 // define the methods we'll use on ContractB
@@ -130,6 +132,7 @@ impl Vault {
             tx_burn: LookupMap::new(StorageKey::Transaction), 
             beacons: TreeMap::new(StorageKey::BeaconHeight),
             token_decimals: LookupMap::new(StorageKey::TokenDecimals),
+            execute_burn_proof_id: 10,
         };
         // insert beacon height and list in tree
         this.beacons.insert(&height, &beacons);
@@ -305,28 +308,11 @@ impl Vault {
             panic!("{}", INVALID_TX_BURN);
         }
         self.tx_burn.insert(&tx_id, &true);
-
-        let account: AccountId = receiver_key.clone().try_into().unwrap();
-        let proxy: AccountId = PROXY_CONTRACT.to_string().try_into().unwrap();
-        if token == NEAR_ADDRESS {
-            ext_proxy::ext(proxy)
-                .with_static_gas(GAS_FOR_FT_TRANSFER)
-                .with_attached_deposit(burn_amount)
-                .deposit_near(
-                    account,
-                    true,
-                ).into()
-        } else {
-            let token: AccountId = token.try_into().unwrap();
-            ext_ft::ext(token)
-                .with_static_gas(GAS_FOR_FT_TRANSFER)
-                .ft_transfer_call(
-                    account,
-                    U128(burn_amount),
-                    None,
-                    receiver_key,
-                ).into()
-        }
+        self.internal_deposit_to_proxy(
+            receiver_key,
+            token,
+            burn_amount
+        )
     }
 
     // call proxy for requesting to execute dapps
@@ -337,6 +323,25 @@ impl Vault {
         v: u8,
     ) -> Promise {
         let verifier_str = hex::encode(extract_verifier(signature.as_ref(), v, &request));
+        self.internal_execute(request, verifier_str)
+    }
+
+    pub fn request_withdraw(
+        &mut self,
+        request: WithdrawRequest,
+        signature: String,
+        v: u8,
+    ) -> Promise {
+        let verifier_str = hex::encode(extract_verifier(signature.as_ref(), v, &request));
+        self.internal_request_withdraw(request, verifier_str)
+    }
+
+    #[private]
+    fn internal_execute(
+        &mut self,
+        request: ExecuteRequest,
+        verifier_str: String,
+    ) -> Promise {
         let verifier_id: AccountId = verifier_str.try_into().unwrap();
         let proxy_id: AccountId = PROXY_CONTRACT.to_string().try_into().unwrap();
 
@@ -349,13 +354,12 @@ impl Vault {
             )
     }
 
-    pub fn request_withdraw(
+    #[private]
+    fn internal_request_withdraw(
         &mut self,
         request: WithdrawRequest,
-        signature: String,
-        v: u8,
+        verifier_str: String
     ) -> Promise {
-        let verifier_str = hex::encode(extract_verifier(signature.as_ref(), v, &request));
         let verifier_id: AccountId = verifier_str.try_into().unwrap();
 
         let proxy_id: AccountId = PROXY_CONTRACT.to_string().try_into().unwrap();
@@ -369,6 +373,39 @@ impl Vault {
                 verifier_id,
                 request.incognito_address,
             )
+
+        // todo: emit event for shielding
+        // must handle fail case
+    }
+
+    #[private]
+    fn internal_deposit_to_proxy(
+        &mut self,
+        receiver_key: String,
+        token: String,
+        amount: u128
+    ) -> Promise {
+        let account: AccountId = receiver_key.clone().try_into().unwrap();
+        let proxy: AccountId = PROXY_CONTRACT.to_string().try_into().unwrap();
+        if token == NEAR_ADDRESS {
+            ext_proxy::ext(proxy)
+                .with_static_gas(GAS_FOR_FT_TRANSFER)
+                .with_attached_deposit(amount)
+                .deposit_near(
+                    account,
+                    true,
+                ).into()
+        } else {
+            let token: AccountId = token.try_into().unwrap();
+            ext_ft::ext(token)
+                .with_static_gas(GAS_FOR_FT_TRANSFER)
+                .ft_transfer_call(
+                    proxy,
+                    U128(amount),
+                    None,
+                    receiver_key,
+                ).into()
+        }
     }
 
     /// execute request from beacon
@@ -383,28 +420,116 @@ impl Vault {
 
         // parse instruction
         let inst = hex::decode(burn_info.inst).unwrap_or_default();
+        assert!(inst.len() < EXECUTE_BURN_PROOF, "Invalid beacon instruction");
+        let inst_ = array_ref![inst, 0, EXECUTE_BURN_PROOF];
         // extract data from instruction
-        // layout: meta(1), shard(1), network(1), extToken(32), extCallAddr(32), amount(32), txID(32), recvToken(32), withdrawAddr(32), redepositAddr(101), extCalldata(*)
+        // removed external call address
+        // layout: meta(1), shard(1), network(1), extToken(32), amount(32), txID(32), recvToken(32), withdrawAddr(32), redepositAddr(101), extCalldata(*)
         #[allow(clippy::ptr_offset_with_cast)]
         let (
             meta_type, shard_id, _,
             token_len, token,
-            ext_call_addr_len, ext_call_addr,
             _, amount, tx_id,
             recv_token_len, recv_token,
             withdraw_addr_len, withdraw_addr,
-            redeposit_addr, call_data
-        ) = array_refs![inst.as_slice(), 1, 1, 1, 1, 64, 1, 64, 24, 8, 32, 1, 64, 1, 64, 101, burn_info.inst.len() - 429];
+            redeposit_addr
+        ) = array_refs![inst_, 1, 1, 1, 1, 64, 24, 8, 32, 1, 64, 1, 64, 101];
         let meta_type = u8::from_be_bytes(*meta_type);
         let shard_id = u8::from_be_bytes(*shard_id);
-        let request_amount = u128::from(u64::from_be_bytes(*amount));
+
         let token_len = u8::from_be_bytes(*token_len);
-        let receiver_len = u8::from_be_bytes(*receiver_len);
         let token = &token[64 - token_len as usize..];
         let token: String = String::from_utf8(token.to_vec()).unwrap_or_default();
-        let receiver_key = &receiver_key[64 - receiver_len as usize..];
-        let receiver_key: String = String::from_utf8(receiver_key.to_vec()).unwrap_or_default();
 
+        let amount = u128::from(u64::from_be_bytes(*amount));
+
+        let recv_token_len = u8::from_be_bytes(*recv_token_len);
+        let recv_token = &recv_token[64 - recv_token_len as usize..];
+        let recv_token: String = String::from_utf8(recv_token.to_vec()).unwrap_or_default();
+
+        let withdraw_addr_len = u8::from_be_bytes(*withdraw_addr_len);
+        let withdraw_addr = &withdraw_addr[64 - withdraw_addr_len as usize..];
+        let mut withdraw_addr: String = String::from_utf8(withdraw_addr.to_vec()).unwrap_or_default();
+
+        let redeposit_addr: String = format!("{:?}", redeposit_addr);
+        let call_data = &inst.as_slice()[inst.len() - EXECUTE_BURN_PROOF as usize..];
+
+        // verify
+        // validate metatype and key provided
+        if (meta_type != EXECUTE_BURN_PROOF_METADATA) || shard_id != 1 {
+            panic!("{}", INVALID_METADATA);
+        }
+
+        // check tx burn used
+        if self.tx_burn.get(&tx_id).unwrap_or_default() {
+            panic!("{}", INVALID_TX_BURN);
+        }
+        self.tx_burn.insert(&tx_id, &true);
+
+        let is_withdraw = withdraw_addr_len != 0;
+        if !is_withdraw {
+            withdraw_addr = self.execute_burn_proof_id.to_string();
+            self.execute_burn_proof_id += 1;
+        }
+        // move token to proxy
+        let deposit_proxy = self.internal_deposit_to_proxy(
+            withdraw_addr.clone(),
+            token.clone(),
+            amount
+        );
+
+        // execute
+        let execute_data = ExecuteRequest {
+            token: token.clone(),
+            amount,
+            timestamp: 0,
+            call_data: format!("{:?}", call_data),
+        };
+        let execute = self.internal_execute(
+            execute_data,
+            withdraw_addr.clone(),
+        );
+
+        // todo:
+        // detect fail case from proxy to have the properly next step
+
+        if is_withdraw {
+            let withdraw_addr: AccountId = withdraw_addr.try_into().unwrap();
+            // transfer swapped token direct to user
+            let transfer_ps;
+            if token == NEAR_ADDRESS {
+                // todo: update transfer amount
+                transfer_ps = Promise::new(withdraw_addr.clone()).transfer(0);
+            } else {
+                let token_acc: AccountId = token.try_into().unwrap();
+                transfer_ps = ext_ft::ext(token_acc)
+                    .with_static_gas(GAS_FOR_FT_TRANSFER)
+                    .with_attached_deposit(1)
+                    .ft_transfer(
+                        withdraw_addr,
+                        U128(0),
+                        None,
+                    );
+            }
+            deposit_proxy
+            .then(
+                execute
+            ).then(
+                transfer_ps
+            )
+        } else {
+            // withdraw request
+            // let withdraw_data = WithdrawRequest {
+            //     incognito_address: redeposit_addr,
+            //     amount,
+            //     timestamp: 0,
+            // };
+            // let withdraw_request = self.internal_request_withdraw();
+            deposit_proxy
+                .then(
+                    execute
+                )
+        }
     }
 
     /// getters

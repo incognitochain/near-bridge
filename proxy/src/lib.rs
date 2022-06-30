@@ -133,7 +133,7 @@ impl Proxy {
         let amount = env::attached_deposit();
         assert!(amount > 0, "Requires positive attached deposit");
 
-        // ! Storage deposit first to all registed contracts.
+        // ! Storage deposit first to all registered contracts.
 
         let wnear_id: AccountId = WRAP_NEAR_ACCOUNT.to_string().try_into().unwrap();
 
