@@ -109,16 +109,17 @@ fn instruction_in_merkle_tree(
 }
 
 /// get signer from signature
-pub fn extract_verifier<T: Serialize>(_s_r: String, v: u8, request: T) -> [u8; 20] {
+pub fn extract_verifier<T: Serialize>(_r_s: &str, v: u8, request: T) -> [u8; 20] {
     let serialized = serde_json::to_string(&request).unwrap();
     let data = env::keccak256(serialized.as_bytes());
-    let s_r = hex::decode(_s_r).unwrap_or_default().as_slice();
-    env::ripemd160_array(
-        env::ecrecover(
-            &data,
-            s_r,
-            v,
-            false,
-        ).unwrap().as_slice()
-    )
+    let r_s = hex::decode(_r_s).unwrap_or_default();
+    let public = env::ecrecover(
+        &data,
+        r_s.as_slice(),
+        v,
+        false,
+    ).unwrap();
+    let mut address = [0u8; 20];
+    address.copy_from_slice(&env::keccak256_array(&public[..])[12..]);
+    return address;
 }
