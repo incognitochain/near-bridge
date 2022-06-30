@@ -12,4 +12,6 @@ near-sdk = { version = "4.0.0-pre.9", features = ["unstable"] }
 near-contract-standards = "4.0.0-pre.9"
 hex = "0.4.3"
 arrayref = "0.3.6"
+
+[dev-dependencies]
 ethsign = "0.8.0"

@@ -33,7 +33,7 @@ impl FungibleTokenReceiver for Proxy {
             PromiseOrValue::Value(U128(0))
         } else {
             let message =
-                serde_json::from_str::<TokenReceiverMessage>(&msg).expect(ERR28_WRONG_MSG_FORMAT);
+                serde_json::from_str::<TokenReceiverMessage>(&msg).expect(WRONG_MSG_FORMAT);
             match message {
                 TokenReceiverMessage::Deposit { account_id } => {
                     self.internal_deposit_token(&account_id, &token_in, amount.into());
