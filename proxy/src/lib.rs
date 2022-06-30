@@ -285,6 +285,7 @@ impl Proxy {
         }
     }
 
+    #[private]
     pub fn callback_wnear(&mut self, account_id: AccountId, amount: U128) -> PromiseOrValue<U128> {
         assert_eq!(env::promise_results_count(), 1, "This is a callback method");
 
@@ -302,6 +303,7 @@ impl Proxy {
         }
     }
 
+    #[private]
     pub fn callback_deposit_ref_finance(
         &mut self,
         action: SwapAction,
@@ -349,6 +351,7 @@ impl Proxy {
         }
     }
 
+    #[private]
     pub fn callback_swap_ref_finance(
         &mut self,
         action: SwapAction,
@@ -402,6 +405,7 @@ impl Proxy {
         }
     }
 
+    #[private]
     pub fn callback_withdraw_ref_finance(
         &mut self,
         account_id: AccountId,
@@ -419,6 +423,7 @@ impl Proxy {
         };
     }
 
+    #[private]
     pub fn callback_withdraw(&mut self, account_id: AccountId, token_id: AccountId, amount: U128) {
         assert_eq!(env::promise_results_count(), 1, "This is a callback method");
 
