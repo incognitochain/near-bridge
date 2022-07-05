@@ -12,13 +12,21 @@ mod utils;
 use std::str;
 use std::cmp::Ordering;
 use std::convert::{TryInto};
+use std::thread::sleep;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::{env, near_bindgen, BorshStorageKey, PanicOnDefault, ext_contract, PromiseResult, AccountId, Promise, PromiseOrValue};
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::collections::{LookupMap, TreeMap};
 use crate::errors::*;
-use crate::utils::{PROXY_CONTRACT, NEAR_ADDRESS, WITHDRAW_INST_LEN, SWAP_COMMITTEE_INST_LEN, WITHDRAW_METADATA, SWAP_BEACON_METADATA, BURN_METADATA};
-use crate::utils::{GAS_FOR_FT_TRANSFER, GAS_FOR_EXECUTE, GAS_FOR_WITHDRAW, EXECUTE_BURN_PROOF, EXECUTE_BURN_PROOF_METADATA};
+use crate::utils::{
+    PROXY_CONTRACT, NEAR_ADDRESS,
+    WITHDRAW_INST_LEN, SWAP_COMMITTEE_INST_LEN,
+    WITHDRAW_METADATA, SWAP_BEACON_METADATA,
+    BURN_METADATA, GAS_FOR_FT_TRANSFER,
+    GAS_FOR_HANDLE_EXECUTE_BURN_PROOF,
+    GAS_FOR_EXECUTE, GAS_FOR_WITHDRAW,
+    EXECUTE_BURN_PROOF, EXECUTE_BURN_PROOF_METADATA
+};
 use crate::utils::{verify_inst, extract_verifier};
 use arrayref::{array_refs, array_ref};
 use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
@@ -99,7 +107,14 @@ pub trait FtContract {
 pub trait ProxyContract {
     fn deposit_near(&mut self, account_id: AccountId, wrap: bool);
     fn call_dapp(&mut self, account_id: AccountId, msg: String) -> (String, U128);
-    fn withdraw(&mut self, token_id: String, amount: U128, account_id: AccountId, incognito_address: String) -> U128;
+    fn withdraw(
+        &mut self,
+        token_id: String,
+        amount: U128,
+        account_id: AccountId,
+        incognito_address: String,
+        withdraw_address: String,
+    ) -> U128;
 }
 
 // define methods we'll use as callbacks on ContractA
@@ -116,6 +131,13 @@ pub trait Callbacks {
         incognito_address: String,
         token: AccountId,
     );
+    fn callback_execute_burnproof(
+        &self,
+        incognito_address: String,
+        withdraw_addr_str: String,
+        source_token: String,
+        request_id: String,
+    ) -> Promise;
 }
 
 #[near_bindgen]
@@ -333,7 +355,7 @@ impl Vault {
         v: u8,
     ) -> Promise {
         let verifier_str = hex::encode(extract_verifier(signature.as_ref(), v, &request));
-        self.internal_request_withdraw(request, verifier_str)
+        self.internal_request_withdraw(request, verifier_str, "".to_string())
     }
 
     #[private]
@@ -358,7 +380,8 @@ impl Vault {
     fn internal_request_withdraw(
         &mut self,
         request: WithdrawRequest,
-        verifier_str: String
+        verifier_str: String,
+        withdraw_str: String,
     ) -> Promise {
         let verifier_id: AccountId = verifier_str.try_into().unwrap();
 
@@ -372,10 +395,8 @@ impl Vault {
                 U128(request.amount),
                 verifier_id,
                 request.incognito_address,
+                withdraw_str,
             )
-
-        // todo: emit event for shielding
-        // must handle fail case
     }
 
     #[private]
@@ -424,16 +445,15 @@ impl Vault {
         let inst_ = array_ref![inst, 0, EXECUTE_BURN_PROOF];
         // extract data from instruction
         // removed external call address
-        // layout: meta(1), shard(1), network(1), extToken(32), amount(32), txID(32), recvToken(32), withdrawAddr(32), redepositAddr(101), extCalldata(*)
+        // layout: meta(1), shard(1), network(1), extToken(32), amount(32), txID(32), withdrawAddr(32), redepositAddr(101), extCalldata(*)
         #[allow(clippy::ptr_offset_with_cast)]
         let (
             meta_type, shard_id, _,
             token_len, token,
             _, amount, tx_id,
-            recv_token_len, recv_token,
             withdraw_addr_len, withdraw_addr,
             redeposit_addr
-        ) = array_refs![inst_, 1, 1, 1, 1, 64, 24, 8, 32, 1, 64, 1, 64, 101];
+        ) = array_refs![inst_, 1, 1, 1, 1, 64, 24, 8, 32, 1, 64, 101];
         let meta_type = u8::from_be_bytes(*meta_type);
         let shard_id = u8::from_be_bytes(*shard_id);
 
@@ -442,10 +462,6 @@ impl Vault {
         let token: String = String::from_utf8(token.to_vec()).unwrap_or_default();
 
         let amount = u128::from(u64::from_be_bytes(*amount));
-
-        let recv_token_len = u8::from_be_bytes(*recv_token_len);
-        let recv_token = &recv_token[64 - recv_token_len as usize..];
-        let recv_token: String = String::from_utf8(recv_token.to_vec()).unwrap_or_default();
 
         let withdraw_addr_len = u8::from_be_bytes(*withdraw_addr_len);
         let withdraw_addr = &withdraw_addr[64 - withdraw_addr_len as usize..];
@@ -465,15 +481,14 @@ impl Vault {
             panic!("{}", INVALID_TX_BURN);
         }
         self.tx_burn.insert(&tx_id, &true);
-
-        let is_withdraw = withdraw_addr_len != 0;
-        if !is_withdraw {
-            withdraw_addr = self.execute_burn_proof_id.to_string();
-            self.execute_burn_proof_id += 1;
+        if withdraw_addr_len == 0 {
+            withdraw_addr = "".to_string();
         }
+        let proxy_deposit_addr = self.execute_burn_proof_id.to_string();
+        self.execute_burn_proof_id += 1;
         // move token to proxy
         let deposit_proxy = self.internal_deposit_to_proxy(
-            withdraw_addr.clone(),
+            proxy_deposit_addr.clone(),
             token.clone(),
             amount
         );
@@ -487,49 +502,24 @@ impl Vault {
         };
         let execute = self.internal_execute(
             execute_data,
-            withdraw_addr.clone(),
+            proxy_deposit_addr.clone(),
         );
 
         // todo:
         // detect fail case from proxy to have the properly next step
-
-        if is_withdraw {
-            let withdraw_addr: AccountId = withdraw_addr.try_into().unwrap();
-            // transfer swapped token direct to user
-            let transfer_ps;
-            if token == NEAR_ADDRESS {
-                // todo: update transfer amount
-                transfer_ps = Promise::new(withdraw_addr.clone()).transfer(0);
-            } else {
-                let token_acc: AccountId = token.try_into().unwrap();
-                transfer_ps = ext_ft::ext(token_acc)
-                    .with_static_gas(GAS_FOR_FT_TRANSFER)
-                    .with_attached_deposit(1)
-                    .ft_transfer(
-                        withdraw_addr,
-                        U128(0),
-                        None,
-                    );
-            }
-            deposit_proxy
-            .then(
-                execute
-            ).then(
-                transfer_ps
-            )
-        } else {
-            // withdraw request
-            // let withdraw_data = WithdrawRequest {
-            //     incognito_address: redeposit_addr,
-            //     amount,
-            //     timestamp: 0,
-            // };
-            // let withdraw_request = self.internal_request_withdraw();
-            deposit_proxy
-                .then(
-                    execute
-                )
-        }
+        // transfer token
+        deposit_proxy.then(
+            execute
+        ).then(
+            // request withdraw from proxy to vault or transfer directly
+            Self::ext(env::current_account_id())
+                .with_static_gas(GAS_FOR_HANDLE_EXECUTE_BURN_PROOF)
+                .callback_execute_burnproof(
+                    redeposit_addr,
+                    withdraw_addr,
+                    token,
+                    proxy_deposit_addr,
+        ))
     }
 
     /// getters
@@ -590,6 +580,45 @@ impl Vault {
             ).as_str());
 
         PromiseOrValue::Value(U128(0))
+    }
+
+    #[private]
+    pub fn callback_execute_burnproof(
+        &mut self,
+        incognito_address: String,
+        withdraw_addr_str: String,
+        source_token: String,
+        request_id: String,
+    ) -> Promise {
+        assert_eq!(env::promise_results_count(), 1, "This is a callback method");
+
+        // handle the result from the second cross contract call this method is a callback for
+        let execute_result: (String, U128) = match env::promise_result(0) {
+            PromiseResult::NotReady => unreachable!(),
+            PromiseResult::Failed => panic!("{:?}", b"Unable to make comparison"),
+            PromiseResult::Successful(result) => near_sdk::serde_json::from_slice::<(String, U128)>(&result)
+                .unwrap()
+                .into(),
+        };
+
+        // withdraw request
+        let withdraw_data = WithdrawRequest {
+            incognito_address,
+            amount: execute_result.1.0,
+            token: execute_result.0.clone(),
+            timestamp: 0,
+        };
+
+        let mut temp = withdraw_addr_str;
+        if source_token == execute_result.0 {
+            temp = "".to_string();
+        }
+
+        self.internal_request_withdraw(
+            withdraw_data,
+            request_id,
+            temp,
+        )
     }
 }
 

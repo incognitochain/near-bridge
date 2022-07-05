@@ -63,7 +63,7 @@ pub trait Callbacks {
         account_id: AccountId,
         token_id: AccountId,
         amount: U128,
-    );
+    ) -> (String, U128);
     fn callback_withdraw(&mut self, account_id: AccountId, token_id: AccountId, amount: U128);
 }
 
@@ -214,6 +214,7 @@ impl Proxy {
         amount: u128,
         account_id: AccountId,
         incognito_address: String,
+        withdraw_address: String,
     ) -> Promise {
         let sender_id = env::predecessor_account_id();
         assert_eq!(sender_id.to_string(), BRIDGE_CONTRACT);
@@ -224,31 +225,33 @@ impl Proxy {
             withdraw_token = token_id.clone();
         }
         let withdraw_token_id: AccountId = withdraw_token.clone().try_into().unwrap();
-
         let mut withdraw_amount = amount;
         if amount == 0 {
             withdraw_amount = self.internal_get_balance_token(&account_id, &withdraw_token_id);
         }
-
         let bridge_id: AccountId = BRIDGE_CONTRACT.to_string().try_into().unwrap();
-
-        self.internal_withdraw_token(&account_id, &withdraw_token_id, withdraw_amount);
-
-        if token_id != "" {
+        let mut receiver: AccountId = bridge_id.clone();
+        let mut msg = "".to_string();
+        if !withdraw_address.clone().is_empty() {
             // not withdraw NEAR
             let obj = Deposit {
                 incognito_address: incognito_address.clone(),
             };
-            let msg = serde_json::to_string(&obj).unwrap();
+            msg = serde_json::to_string(&obj).unwrap();
+            receiver = withdraw_address.clone().try_into().unwrap();
+        }
+        self.internal_withdraw_token(&account_id, &withdraw_token_id, withdraw_amount);
+
+        if token_id != "" {
             let ft_transfer_call_ps = ext_ft::ext(withdraw_token_id.clone())
                 .with_static_gas(GAS_FOR_DEPOSIT)
                 .with_attached_deposit(1)
                 .ft_transfer_call(
-                    bridge_id,
+                    receiver,
                     U128(withdraw_amount),
                     None,
                     msg,
-                );
+            );
 
             ft_transfer_call_ps
             .then(Self::ext(env::current_account_id())
@@ -266,12 +269,16 @@ impl Proxy {
                     U128(withdraw_amount - 1),
                 );
 
-            let deposit_ps = ext_bridge::ext(bridge_id)
+            let mut deposit_ps = ext_bridge::ext(bridge_id)
                 .with_static_gas(GAS_FOR_DEPOSIT)
                 .with_attached_deposit(withdraw_amount)
                 .deposit(
                     incognito_address,
                 );
+
+            if !withdraw_address.is_empty() {
+                deposit_ps = Promise::new(receiver).transfer(amount);
+            }
 
             near_withdraw_ps
                 .then(deposit_ps)
@@ -411,7 +418,7 @@ impl Proxy {
         account_id: AccountId,
         token_id: AccountId,
         amount: U128,
-    ) {
+    ) -> (String, U128) {
         assert_eq!(env::promise_results_count(), 1, "This is a callback method");
 
         match env::promise_result(0) {
@@ -421,6 +428,7 @@ impl Proxy {
                 self.internal_deposit_token(&account_id, &token_id, amount.into());
             }
         };
+        (token_id.to_string(), amount)
     }
 
     #[private]
