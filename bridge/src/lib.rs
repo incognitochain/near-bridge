@@ -441,7 +441,7 @@ impl Vault {
 
         // parse instruction
         let inst = hex::decode(burn_info.inst).unwrap_or_default();
-        assert!(inst.len() < EXECUTE_BURN_PROOF, "Invalid beacon instruction");
+        assert!(inst.len() > EXECUTE_BURN_PROOF, "Invalid beacon instruction");
         let inst_ = array_ref![inst, 0, EXECUTE_BURN_PROOF];
         // extract data from instruction
         // removed external call address
@@ -459,17 +459,27 @@ impl Vault {
 
         let token_len = u8::from_be_bytes(*token_len);
         let token = &token[64 - token_len as usize..];
-        let token: String = String::from_utf8(token.to_vec()).unwrap_or_default();
+        let token: String = String::from_utf8(token.to_vec()).unwrap();
 
-        let amount = u128::from(u64::from_be_bytes(*amount));
+        let mut amount = u128::from(u64::from_be_bytes(*amount));
+        if token == NEAR_ADDRESS {
+            amount = amount.checked_mul(1e15 as u128).unwrap();
+        } else {
+            let decimals = self.token_decimals.get(&token).unwrap();
+            if decimals > 9 {
+                amount = amount.checked_mul(u128::pow(10, decimals as u32 - 9)).unwrap()
+            }
+        }
 
         let withdraw_addr_len = u8::from_be_bytes(*withdraw_addr_len);
         let withdraw_addr = &withdraw_addr[64 - withdraw_addr_len as usize..];
         let mut withdraw_addr: String = String::from_utf8(withdraw_addr.to_vec()).unwrap_or_default();
 
-        let redeposit_addr: String = format!("{:?}", redeposit_addr);
-        let call_data = &inst.as_slice()[inst.len() - EXECUTE_BURN_PROOF as usize..];
-
+        let redeposit_addr: String = match str::from_utf8(redeposit_addr) {
+            Ok(v) => v.to_string(),
+            Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
+        };
+        let call_data = &inst.as_slice()[EXECUTE_BURN_PROOF as usize..];
         // verify
         // validate metatype and key provided
         if (meta_type != EXECUTE_BURN_PROOF_METADATA) || shard_id != 1 {
@@ -498,7 +508,10 @@ impl Vault {
             token: token.clone(),
             amount,
             timestamp: 0,
-            call_data: format!("{:?}", call_data),
+            call_data: match str::from_utf8(call_data) {
+                Ok(v) => v.to_string(),
+                Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
+            }
         };
         let execute = self.internal_execute(
             execute_data,
@@ -627,6 +640,19 @@ mod tests {
     use super::*;
     use near_sdk::{serde_json};
     use ethsign::{Protected, SecretKey};
+    use near_sdk::test_utils::{accounts, VMContextBuilder};
+    use near_sdk::{testing_env, Balance, MockedBlockchain};
+
+    /// Creates contract and a pool with tokens with 0.3% of total fee.
+    fn setup_contract() -> (VMContextBuilder, Vault) {
+        let mut context = VMContextBuilder::new();
+        testing_env!(context.predecessor_account_id(accounts(0)).build());
+        let contract = Vault::new(
+            vec!["45e6d8d759bc5993097236e5f2d17053969f0b769bb1d0f8e222b6c40a0f6af345e6d8d759bc5993097236e5f2d17053969f0b769bb1d0f8e222b6c40a0f6af3".to_string()],
+            0
+        );
+        (context, contract)
+    }
 
     fn to_32_bytes(hex_str: &str) -> [u8; 32] {
         let bytes = hex::decode(hex_str).unwrap();
@@ -690,5 +716,31 @@ mod tests {
         print!("Actual {:?} \n", hex::encode(result));
         print!("Expect {:?}", hex::encode(secret.public().address()));
         assert_eq!(hex::encode(result), hex::encode(secret.public().address()));
+    }
+
+    #[test]
+    fn test_execute_burn_proof() {
+        let executeRequest = InteractRequest {
+            inst: "a001010c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000777261702e746573746e6574000000000000000000000000000000000000000000000000851812a357a1339d0baceab06e95c52314f6792b2f5e6fd4ce5b583aeb63572f6a75bc56d820de66000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000031327376666b5036773555444a445343777148393738507671697142784b6d556e4139656d3979415957594a565276377775585931716868597050416d3442447a326d4c624672526d644b337952686e54714a435a584b48556d6f69374e563833484348327b22616374696f6e223a7b22706f6f6c5f6964223a35342c22746f6b656e5f696e223a22777261702e746573746e6574222c22616d6f756e745f696e223a2239353930343335383939323434363232373439222c22746f6b656e5f6f7574223a22757364632e66616b65732e746573746e6574222c226d696e5f616d6f756e745f6f7574223a2231227d2c226163636f756e745f6964223a2234393661646432633234653137373131643935313231373239303162353530326466333765313034393364323437633337316562386463336534623137336663227d".to_string(),
+            height: 304,
+            inst_paths: vec![
+                to_32_bytes("82a8c4d7dcdcf1e28ec58e7218155c8f2e75cdc2aded968d63da53efb8848abb")
+            ],
+            inst_path_is_lefts: vec![
+                false
+            ],
+            inst_root: to_32_bytes("fd64d3bd7f578bbb58ee9088949d96f4186b04b3d4b5751ce0104399d7ba4b7c"),
+            blk_data: to_32_bytes("b2f85d2ee41b2fc42a7e06dc90ca5ddec6d3b08e84a97519c9f9709315155681"),
+            indexes: vec![1, 2, 3],
+            signatures: vec![
+                "af503e8cc61c73d6ae5728d5b37d04ec7fa7aff190040cbcffc213c7e2046e721a8d3fe9c12e62e9802f1bedaf1d38b58ea11ed2e38ec4301dd798c5be4ae469".to_string(),
+                "869f5225d790484190ec4bf5113dadc568e8232c90bb711909f3154ff54b477c3b96040e5d041e76dccad008c6453fdfbee8295119bf641f7b9bee8e0d79aa6d".to_string(),
+                "c3622371e7355ab5e4f48097e0e39b435b444f0557b6269c55cd427aac932fb327f5592748f839bbb98666613ebcb1e7100ea02f26a2becb960ba1ef8d909460".to_string(),
+            ],
+            vs: vec![1, 0, 0],
+        };
+
+        let (_, mut contract) = setup_contract();
+        contract.execute_with_burn_proof(executeRequest);
     }
 }

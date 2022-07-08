@@ -1,5 +1,4 @@
 const nearAPI = require("near-api-js");
-const fs = require('fs');
 // creates keyStore from a private key string
 // you can define your key here or use an environment variable
 
@@ -14,9 +13,8 @@ const PRIVATE_KEY =
 const keyPair = KeyPair.fromString(PRIVATE_KEY);
 console.log({keyPair});
 const { connect } = nearAPI;
-const { toHexString } = require('./shieldtests');
-const { web3 } = require('web3');
-
+const Web3 = require("web3");
+const web3 = new Web3();
 (async () => {
     const pk58 = 'ed25519:5wbGqEmJuExCVCck6FLM5FqQRyyPabmBHpHtMbkZMUy1'
     const testAddress = nearAPI.utils.PublicKey.fromString(pk58).data.hexSlice();
@@ -69,7 +67,7 @@ const { web3 } = require('web3');
     const utf8Encode = new TextEncoder();
     let sourceToken = "wrap.testnet";
     let destToken = "usdc.fakes.testnet";
-    let amount = "95904358992446227499";
+    let amount = "9590435899244622749";
     let obj = {
         action: {
             pool_id: 54,
@@ -80,23 +78,29 @@ const { web3 } = require('web3');
         },
         account_id: testAddress,
     }
-    let meta = (1).toString(16).padStart(2, "0");
+    let meta = (160).toString(16).padStart(2, "0");
     let shardId = (1).toString(16).padStart(2, "0");
     let network = (1).toString(16).padStart(2, "0");
-    let extToken = toHexString(utf8Encode.encode("wrap.testnet")).padStart(64, "0");
+    let extToken = toHexString(utf8Encode.encode(sourceToken)).padStart(128, "0");
     let txId = "0baceab06e95c52314f6792b2f5e6fd4ce5b583aeb63572f6a75bc56d820de66";
-    let withdrawAddr = "";
-    let amountInst = web3.utils.numberToHex(amount).slice(0, 2).split("x")[1].padStart(64, "0");
-    let redepositAddress = toHexString(utf8Encode.encode("12svfkP6w5UDJDSCwqH978PvqiqBxKmUnA9em9yAYWYJVRv7wuXY1qhhYpPAm4BDz2mLbFrRmdK3yRhnTqJCZXKHUmoi7NV83HCH2YFpctHNaDdkSiQshsjw2UFUuwdEvcidgaKmF3VJpY5f8RdN"));
+    let withdrawAddrNear = "";
+    let withdrawAddr = toHexString(utf8Encode.encode(withdrawAddrNear)).padStart(128, "0");;
+    let amountInst = web3.utils.numberToHex(amount).split("x")[1].padStart(64, "0");
+    let redepositAddress = toHexString(utf8Encode.encode("12svfkP6w5UDJDSCwqH978PvqiqBxKmUnA9em9yAYWYJVRv7wuXY1qhhYpPAm4BDz2mLbFrRmdK3yRhnTqJCZXKHUmoi7NV83HCH2"));
     let extCallData = toHexString(utf8Encode.encode(JSON.stringify(obj)));
 
-    // layout: meta(1), shard(1), network(1), len(1), extToken(32), amount(32), txID(32), len(1), withdrawAddr(32), redepositAddr(101), extCalldata(*)
-    const beaconInst = meta + shardId + network + toHex(extToken.length) + extToken + txId +
-        + toHex(withdrawAddr.length) + withdrawAddr + amountInst + redepositAddress + extCallData;
+    // layout: meta(1), shard(1), network(1), len(1), extToken(64), amount(32), txID(32), len(1), withdrawAddr(64), redepositAddr(101), extCalldata(*)
+    const beaconInst = meta + shardId + network + toHex(utf8Encode.encode(sourceToken).length) + extToken + amountInst
+        + txId + toHex(withdrawAddrNear.length) + withdrawAddr + redepositAddress + extCallData;
     console.log({beaconInst});
-
 })();
 
 function toHex(number) {
     return ((number).toString(16).length % 2) === 0 ? (number).toString(16) : '0' + (number).toString(16);
+}
+
+function toHexString(byteArray) {
+    return Array.from(byteArray, function(byte) {
+        return ('0' + (byte & 0xFF).toString(16)).slice(-2);
+    }).join('')
 }
