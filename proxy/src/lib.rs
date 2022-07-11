@@ -231,13 +231,13 @@ impl Proxy {
         }
         let bridge_id: AccountId = BRIDGE_CONTRACT.to_string().try_into().unwrap();
         let mut receiver: AccountId = bridge_id.clone();
-        let mut msg = "".to_string();
+        let obj = Deposit {
+            incognito_address: incognito_address.clone(),
+        };
+        let mut msg = serde_json::to_string(&obj).unwrap();
         if !withdraw_address.clone().is_empty() {
             // not withdraw NEAR
-            let obj = Deposit {
-                incognito_address: incognito_address.clone(),
-            };
-            msg = serde_json::to_string(&obj).unwrap();
+            msg = "".to_string();
             receiver = withdraw_address.clone().try_into().unwrap();
         }
         self.internal_withdraw_token(&account_id, &withdraw_token_id, withdraw_amount);
