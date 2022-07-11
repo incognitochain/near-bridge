@@ -9,14 +9,14 @@ const fs = require('fs');
 const { keyStores, KeyPair } = nearAPI;
 const keyStore = new keyStores.InMemoryKeyStore();
 const PRIVATE_KEY =
-    "4kNNnnCt4Va5Chd38FC3yGsPZs9xhZ46QyZjLubU1GAzZE5UA2dZoW4RaVSuRL3ddU6EFBbXEWvdm5WCrZDMnwu8";
+    "nKHv8jGLdTntaUf3Aa6xhYUNMCChUpyXDv19ZropeWwrjqcGioxP2kDkqFw4F2c8Cu2BzXd9zHFygeCMiNT2RUb";
 // creates a public / private key pair using the provided private key
 const keyPair = KeyPair.fromString(PRIVATE_KEY);
 console.log({ keyPair });
 const { connect } = nearAPI;
 
 (async () => {
-    const testAddress = "proxy1.incognito_chain.testnet";
+    const testAddress = "f1a6da2001ca6e98c2e4720619b413c882bd3e5d5e7997fc7dec345279ad10c8";
 
     // adds the keyPair you created to keyStore
     await keyStore.setKey("testnet", testAddress, keyPair);

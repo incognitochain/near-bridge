@@ -14,7 +14,7 @@ use std::cmp::Ordering;
 use std::convert::{TryInto};
 use std::thread::sleep;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
-use near_sdk::{env, near_bindgen, BorshStorageKey, PanicOnDefault, ext_contract, PromiseResult, AccountId, Promise, PromiseOrValue};
+use near_sdk::{env, near_bindgen, BorshStorageKey, PanicOnDefault, ext_contract, PromiseResult, AccountId, Promise, PromiseOrValue, serde_json};
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::collections::{LookupMap, TreeMap};
 use crate::errors::*;
@@ -59,8 +59,6 @@ pub struct InteractRequest {
 #[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug, Clone)]
 #[serde(crate = "near_sdk::serde")]
 pub struct ExecuteRequest {
-    pub token: String,
-    pub amount: u128,
     pub timestamp: u128,
     pub call_data: String,
 }
@@ -110,7 +108,7 @@ pub trait ProxyContract {
     fn withdraw(
         &mut self,
         token_id: String,
-        amount: U128,
+        amount: u128,
         account_id: AccountId,
         incognito_address: String,
         withdraw_address: String,
@@ -138,6 +136,14 @@ pub trait Callbacks {
         source_token: String,
         request_id: String,
     ) -> Promise;
+}
+
+/// Message parameters to receive via token function call.
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(crate = "near_sdk::serde")]
+#[serde(untagged)]
+enum TokenReceiverMessage {
+    Deposit { account_id: AccountId },
 }
 
 #[near_bindgen]
@@ -369,7 +375,6 @@ impl Vault {
 
         ext_proxy::ext(proxy_id)
             .with_static_gas(GAS_FOR_EXECUTE)
-            .with_attached_deposit(request.amount)
             .call_dapp(
                 verifier_id,
                 request.call_data,
@@ -392,7 +397,7 @@ impl Vault {
             .with_static_gas(GAS_FOR_WITHDRAW)
             .withdraw(
                 request.token.clone(),
-                U128(request.amount),
+                request.amount,
                 verifier_id,
                 request.incognito_address,
                 withdraw_str,
@@ -418,13 +423,19 @@ impl Vault {
                 ).into()
         } else {
             let token: AccountId = token.try_into().unwrap();
+            let msg = serde_json::to_string(
+                &TokenReceiverMessage::Deposit {
+                    account_id: account
+                }
+            ).unwrap_or_default();
             ext_ft::ext(token)
                 .with_static_gas(GAS_FOR_FT_TRANSFER)
+                .with_attached_deposit(1)
                 .ft_transfer_call(
                     proxy,
                     U128(amount),
                     None,
-                    receiver_key,
+                    msg,
                 ).into()
         }
     }
@@ -505,8 +516,6 @@ impl Vault {
 
         // execute
         let execute_data = ExecuteRequest {
-            token: token.clone(),
-            amount,
             timestamp: 0,
             call_data: match str::from_utf8(call_data) {
                 Ok(v) => v.to_string(),
@@ -609,7 +618,7 @@ impl Vault {
         let execute_result: (String, U128) = match env::promise_result(0) {
             PromiseResult::NotReady => unreachable!(),
             PromiseResult::Failed => panic!("{:?}", b"Unable to make comparison"),
-            PromiseResult::Successful(result) => near_sdk::serde_json::from_slice::<(String, U128)>(&result)
+            PromiseResult::Successful(result) => serde_json::from_slice::<(String, U128)>(&result)
                 .unwrap()
                 .into(),
         };

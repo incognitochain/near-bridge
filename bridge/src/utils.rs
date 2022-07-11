@@ -3,7 +3,7 @@ use near_sdk::{env, Gas};
 use near_sdk::serde::{Serialize};
 use near_sdk::{serde_json};
 
-pub const PROXY_CONTRACT: &str = "proxy.incognito.testnet";
+pub const PROXY_CONTRACT: &str = "f1a6da2001ca6e98c2e4720619b413c882bd3e5d5e7997fc7dec345279ad10c8";
 
 pub const WITHDRAW_METADATA: u8 = 157;
 pub const SWAP_BEACON_METADATA: u8 = 158;
@@ -15,14 +15,14 @@ pub const NEAR_ADDRESS: &str = "0";
 pub const WITHDRAW_INST_LEN: usize = 1 + 1 + 1 + 64 + 1 + 64 + 32 + 32; // ignore last 64 bytes in instruction
 pub const SWAP_COMMITTEE_INST_LEN: usize = 1 + 1 + 32 + 32 + 32;
 
-pub const GAS_FOR_FT_TRANSFER: Gas = Gas(20_000_000_000_000);
+pub const GAS_FOR_FT_TRANSFER: Gas = Gas(27_000_000_000_000);
 pub const GAS_FOR_RESOLVE_DEPOSIT: Gas = Gas(20_000_000_000_000);
 pub const GAS_FOR_RETRIEVE_INFO: Gas = Gas(10_000_000_000_000);
-pub const GAS_FOR_EXECUTE: Gas = Gas(50_000_000_000_000);
+pub const GAS_FOR_EXECUTE: Gas = Gas(210_000_000_000_000);
 pub const GAS_FOR_RESOLVE_EXECUTE: Gas = Gas(20_000_000_000_000);
-pub const GAS_FOR_WITHDRAW: Gas = Gas(20_000_000_000_000);
+pub const GAS_FOR_WITHDRAW: Gas = Gas(80_000_000_000_000);
 pub const GAS_FOR_RESOLVE_WITHDRAW: Gas = Gas(20_000_000_000_000);
-pub const GAS_FOR_HANDLE_EXECUTE_BURN_PROOF: Gas = Gas(20_000_000_000_000);
+pub const GAS_FOR_HANDLE_EXECUTE_BURN_PROOF: Gas = Gas(42_000_000_000_000);
 
 pub fn verify_inst(
     request_info: &InteractRequest, beacons: Vec<String>,

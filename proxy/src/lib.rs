@@ -193,8 +193,8 @@ impl Proxy {
 
                 ft_transfer_call_ps
                 .then(Self::ext(env::current_account_id())
-                    .with_static_gas(GAS_FOR_RESOLVE_SWAP_REF_FINANCE)
-                    .callback_swap_ref_finance(
+                    .with_static_gas(GAS_FOR_RESOLVE_DEPOSIT_REF_FINANCE)
+                    .callback_deposit_ref_finance(
                         SwapAction {
                             pool_id,
                             token_in: token_in.clone(),
@@ -243,7 +243,7 @@ impl Proxy {
         self.internal_withdraw_token(&account_id, &withdraw_token_id, withdraw_amount);
 
         if token_id != "" {
-            let ft_transfer_call_ps = ext_ft::ext(withdraw_token_id.clone())
+            ext_ft::ext(withdraw_token_id.clone())
                 .with_static_gas(GAS_FOR_DEPOSIT)
                 .with_attached_deposit(1)
                 .ft_transfer_call(
@@ -251,16 +251,8 @@ impl Proxy {
                     U128(withdraw_amount),
                     None,
                     msg,
-            );
+            )
 
-            ft_transfer_call_ps
-            .then(Self::ext(env::current_account_id())
-                .with_static_gas(GAS_FOR_RESOLVE_DEPOSIT)
-                .callback_withdraw(
-                    account_id.clone(),
-                    withdraw_token_id.clone(),
-                    U128(withdraw_amount),
-                )).into()
         } else {
             let near_withdraw_ps = ext_wnear::ext(WRAP_NEAR_ACCOUNT.to_string().try_into().unwrap())
                 .with_static_gas(GAS_FOR_WNEAR)
@@ -282,13 +274,7 @@ impl Proxy {
 
             near_withdraw_ps
                 .then(deposit_ps)
-                .then(Self::ext(env::current_account_id())
-                    .with_static_gas(GAS_FOR_RESOLVE_DEPOSIT)
-                    .callback_withdraw(
-                        account_id.clone(),
-                        withdraw_token_id.clone(),
-                        U128(withdraw_amount),
-                    )).into()
+                .into()
         }
     }
 
@@ -349,6 +335,7 @@ impl Proxy {
                     account_id,
             )).into()
         } else {
+            // todo: update new flow
             self.internal_deposit_token(
                 &account_id,
                 &action.token_in.clone(),
