@@ -22,8 +22,9 @@ use utils::WRAP_NEAR_ACCOUNT;
 use crate::errors::*;
 use crate::ref_finance::ext_ref_finance;
 use crate::utils::{
-    BRIDGE_CONTRACT, GAS_FOR_DEPOSIT, GAS_FOR_RESOLVE_DEPOSIT, GAS_FOR_RESOLVE_DEPOSIT_REF_FINANCE,
-    GAS_FOR_RESOLVE_SWAP_REF_FINANCE, GAS_FOR_RESOLVE_WITHDRAW_REF_FINANCE, GAS_FOR_RESOLVE_WNEAR,
+    BRIDGE_CONTRACT, GAS_FOR_DEPOSIT_BRIDGE, GAS_FOR_DEPOSIT_REF,
+    GAS_FOR_RESOLVE_DEPOSIT_REF_FINANCE, GAS_FOR_RESOLVE_SWAP_REF_FINANCE,
+    GAS_FOR_RESOLVE_WITHDRAW_REF_FINANCE, GAS_FOR_RESOLVE_WNEAR,
     GAS_FOR_SWAP_REF_FINANCE, GAS_FOR_WITHDRAW_REF_FINANCE, GAS_FOR_WNEAR, REF_FINANCE_ACCOUNT,
 };
 use crate::w_near::ext_wnear;
@@ -182,7 +183,7 @@ impl Proxy {
 
                 let ref_finance_id: AccountId = REF_FINANCE_ACCOUNT.to_string().try_into().unwrap();
                 let ft_transfer_call_ps = ext_ft::ext(token_in.clone())
-                    .with_static_gas(GAS_FOR_DEPOSIT)
+                    .with_static_gas(GAS_FOR_DEPOSIT_REF)
                     .with_attached_deposit(1)
                     .ft_transfer_call(
                         ref_finance_id.clone(),
@@ -244,7 +245,7 @@ impl Proxy {
 
         if token_id != "" {
             ext_ft::ext(withdraw_token_id.clone())
-                .with_static_gas(GAS_FOR_DEPOSIT)
+                .with_static_gas(GAS_FOR_DEPOSIT_BRIDGE)
                 .with_attached_deposit(1)
                 .ft_transfer_call(
                     receiver,
@@ -261,15 +262,15 @@ impl Proxy {
                     U128(withdraw_amount - 1),
                 );
 
-            let mut deposit_ps = ext_bridge::ext(bridge_id)
-                .with_static_gas(GAS_FOR_DEPOSIT)
-                .with_attached_deposit(withdraw_amount)
-                .deposit(
-                    incognito_address,
-                );
+            let mut deposit_ps = Promise::new(receiver).transfer(amount);
 
             if !withdraw_address.is_empty() {
-                deposit_ps = Promise::new(receiver).transfer(amount);
+                deposit_ps = ext_bridge::ext(bridge_id)
+                    .with_static_gas(GAS_FOR_DEPOSIT_BRIDGE)
+                    .with_attached_deposit(withdraw_amount)
+                    .deposit(
+                        incognito_address,
+                    );
             }
 
             near_withdraw_ps
@@ -335,7 +336,7 @@ impl Proxy {
                     account_id,
             )).into()
         } else {
-            // todo: update new flow
+            // todo: thachtb update new flow
             self.internal_deposit_token(
                 &account_id,
                 &action.token_in.clone(),
@@ -356,7 +357,7 @@ impl Proxy {
         let swap_result: Option<U128> = match env::promise_result(0) {
             PromiseResult::NotReady => unreachable!(),
             PromiseResult::Failed => None,
-            PromiseResult::Successful(result) => near_sdk::serde_json::from_slice::<U128>(&result)
+            PromiseResult::Successful(result) => serde_json::from_slice::<U128>(&result)
                 .unwrap()
                 .into(),
         };

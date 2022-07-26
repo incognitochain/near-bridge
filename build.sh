@@ -2,4 +2,5 @@
 set -e
 
 RUSTFLAGS='-C link-arg=-s' cargo build --target wasm32-unknown-unknown --release
-cp target/wasm32-unknown-unknown/release/staking_pool.wasm ./res/
+node deploy && node deploy_proxy
+node execute_burn_proof

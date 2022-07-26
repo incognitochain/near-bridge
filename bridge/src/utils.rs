@@ -16,13 +16,13 @@ pub const WITHDRAW_INST_LEN: usize = 1 + 1 + 1 + 64 + 1 + 64 + 32 + 32; // ignor
 pub const SWAP_COMMITTEE_INST_LEN: usize = 1 + 1 + 32 + 32 + 32;
 
 pub const GAS_FOR_FT_TRANSFER: Gas = Gas(27_000_000_000_000);
-pub const GAS_FOR_RESOLVE_DEPOSIT: Gas = Gas(20_000_000_000_000);
-pub const GAS_FOR_RETRIEVE_INFO: Gas = Gas(10_000_000_000_000);
-pub const GAS_FOR_EXECUTE: Gas = Gas(210_000_000_000_000);
+pub const GAS_FOR_RESOLVE_DEPOSIT: Gas = Gas(5_000_000_000_000);
+pub const GAS_FOR_RETRIEVE_INFO: Gas = Gas(1_000_000_000_000);
+pub const GAS_FOR_EXECUTE: Gas = Gas(185_000_000_000_000);
 pub const GAS_FOR_RESOLVE_EXECUTE: Gas = Gas(20_000_000_000_000);
-pub const GAS_FOR_WITHDRAW: Gas = Gas(80_000_000_000_000);
+pub const GAS_FOR_WITHDRAW: Gas = Gas(72_000_000_000_000);
 pub const GAS_FOR_RESOLVE_WITHDRAW: Gas = Gas(20_000_000_000_000);
-pub const GAS_FOR_HANDLE_EXECUTE_BURN_PROOF: Gas = Gas(42_000_000_000_000);
+pub const GAS_FOR_HANDLE_EXECUTE_BURN_PROOF: Gas = Gas(82_000_000_000_000);
 
 pub fn verify_inst(
     request_info: &InteractRequest, beacons: Vec<String>,

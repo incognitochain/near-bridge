@@ -128,7 +128,7 @@ const web3 = new Web3();
     let shardId = (1).toString(16).padStart(2, "0");
     let network = (1).toString(16).padStart(2, "0");
     let extToken = toHexString(utf8Encode.encode(sourceToken)).padStart(128, "0");
-    let txId = "ffcdeab06e95c52314f6792b2f5e6fd4ce5b583aeb63572f6a75bc56d820de66";
+    let txId = getRanHex(64);
     let withdrawAddrNear = "";
     let withdrawAddr = toHexString(utf8Encode.encode(withdrawAddrNear)).padStart(128, "0");;
     let amountInst = web3.utils.numberToHex((BigInt(amount) / REMOVE_FRACTION).toString()).split("x")[1].padStart(64, "0");
@@ -190,4 +190,14 @@ function to32Bytes(hexStr) {
     bytes.copy(padded);
     const arr = [...padded];
     return arr;
+}
+
+const getRanHex = size => {
+    let result = [];
+    let hexRef = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'];
+
+    for (let n = 0; n < size; n++) {
+        result.push(hexRef[Math.floor(Math.random() * 16)]);
+    }
+    return result.join('');
 }
