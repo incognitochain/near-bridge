@@ -11,7 +11,7 @@ const keyStore = new keyStores.InMemoryKeyStore();
 const PRIVATE_KEY =
     "4GrZBkRSEp8YT6ztXHUu9wzrDb3qrpFpyTzEsFR5yovjbGqt16aKQVR7WHoMUdBoNwe2NJRGZ22mt1o3j2wda1jk";
 const SENDER_ADDRESS = "cuongcute.testnet";
-const TOKEN_ADDRESS = "ft0.cuongcute.testnet"
+const TOKEN_ADDRESS = "wrap.testnet"
 // creates a public / private key pair using the provided private key
 const keyPair = KeyPair.fromString(PRIVATE_KEY);
 console.log({keyPair});
@@ -37,7 +37,7 @@ const { connect } = nearAPI;
 
     console.log({senderAddress: senderAccount});
 
-    const contractId = "496add2c24e17711d9512172901b5502df37e10493d247c371eb8dc3e4b173fc";
+    const contractId = "0baceab06e95c52314f6792b2f5e6fd4ce5b583aeb63572f6a75bc56d820de66";
     console.log(contractId);
 
     const contract = new nearAPI.Contract(
@@ -52,7 +52,7 @@ const { connect } = nearAPI;
     // register account id
     await contract.storage_deposit(
         {
-            account_id: "prv-test-shield.testnet",
+            account_id: contractId,
             registration_only: true,
         },
         "300000000000000",
@@ -65,17 +65,11 @@ const { connect } = nearAPI;
         {
             sender_id: "cuongcute.testnet",
             receiver_id: contractId,
-            amount: "10000000000",
+            amount: "10000000000000000000000",
             msg: '{"incognito_address": "' + incognitoAddress + '"}'
         },
-        "300000000000000",
+        "50000000000000",
         "1"
     );
 
 })();
-
-function toHexString(byteArray) {
-    return Array.from(byteArray, function(byte) {
-        return ('0' + (byte & 0xFF).toString(16)).slice(-2);
-    }).join('')
-}

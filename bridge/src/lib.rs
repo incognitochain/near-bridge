@@ -8,11 +8,11 @@ NOTES:
 mod token_receiver;
 mod errors;
 mod utils;
+mod w_near;
 
 use std::str;
 use std::cmp::Ordering;
 use std::convert::{TryInto};
-use std::thread::sleep;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::{env, near_bindgen, BorshStorageKey, PanicOnDefault, ext_contract, PromiseResult, AccountId, Promise, PromiseOrValue, serde_json};
 use near_sdk::serde::{Deserialize, Serialize};
@@ -23,15 +23,17 @@ use crate::utils::{
     WITHDRAW_INST_LEN, SWAP_COMMITTEE_INST_LEN,
     WITHDRAW_METADATA, SWAP_BEACON_METADATA,
     BURN_METADATA, GAS_FOR_FT_TRANSFER,
-    GAS_FOR_HANDLE_EXECUTE_BURN_PROOF,
     GAS_FOR_EXECUTE, GAS_FOR_WITHDRAW,
-    EXECUTE_BURN_PROOF, EXECUTE_BURN_PROOF_METADATA
+    EXECUTE_BURN_PROOF, EXECUTE_BURN_PROOF_METADATA,
+    WRAP_NEAR_ACCOUNT, GAS_FOR_WNEAR,
+    GAS_FOR_RESOLVE_WNEAR, GAS_FOR_RESOLVE_BRIDGE,
+    GAS_FOR_DEPOSIT_AND_EXECUTE
 };
 use crate::utils::{verify_inst, extract_verifier};
 use arrayref::{array_refs, array_ref};
 use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
 use near_sdk::json_types::U128;
-
+use crate::w_near::ext_wnear;
 
 #[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug, Clone)]
 #[serde(crate = "near_sdk::serde")]
@@ -61,6 +63,9 @@ pub struct InteractRequest {
 pub struct ExecuteRequest {
     pub timestamp: u128,
     pub call_data: String,
+    pub incognito_address: String,
+    pub token: String,
+    pub amount: u128,
 }
 
 #[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug, Clone)]
@@ -77,6 +82,12 @@ pub(crate) enum StorageKey {
     Transaction,
     BeaconHeight,
     TokenDecimals,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
+pub struct Execute {
+    call_data: String
 }
 
 #[near_bindgen]
@@ -118,6 +129,8 @@ pub trait ProxyContract {
 // define methods we'll use as callbacks on ContractA
 #[ext_contract(this_contract)]
 pub trait Callbacks {
+    fn callback_wnear(&mut self, account_id: AccountId, amount: U128);
+    fn callback_bridge(&mut self);
     fn callback_deposit(
         &self,
         incognito_address: String,
@@ -505,43 +518,71 @@ impl Vault {
         if withdraw_addr_len == 0 {
             withdraw_addr = "".to_string();
         }
-        let proxy_deposit_addr = self.execute_burn_proof_id.to_string();
-        self.execute_burn_proof_id += 1;
-        // move token to proxy
-        let deposit_proxy = self.internal_deposit_to_proxy(
-            proxy_deposit_addr.clone(),
-            token.clone(),
-            amount
-        );
 
-        // execute
         let execute_data = ExecuteRequest {
             timestamp: 0,
             call_data: match str::from_utf8(call_data) {
                 Ok(v) => v.to_string(),
                 Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
-            }
+            },
+            incognito_address: redeposit_addr.clone(),
+            token,
+            amount
         };
-        let execute = self.internal_execute(
-            execute_data,
-            proxy_deposit_addr.clone(),
-        );
 
-        // todo:
-        // detect fail case from proxy to have the properly next step
-        // transfer token
-        deposit_proxy.then(
-            execute
-        ).then(
-            // request withdraw from proxy to vault or transfer directly
-            Self::ext(env::current_account_id())
-                .with_static_gas(GAS_FOR_HANDLE_EXECUTE_BURN_PROOF)
-                .callback_execute_burnproof(
-                    redeposit_addr,
-                    withdraw_addr,
-                    token,
-                    proxy_deposit_addr,
-        ))
+        // convert to w-near if move native near
+        if token == NEAR_ADDRESS {
+            let wnear_id: AccountId = WRAP_NEAR_ACCOUNT.to_string().try_into().unwrap();
+            let near_deposit_ps = ext_wnear::ext(wnear_id)
+                .with_static_gas(GAS_FOR_WNEAR)
+                .with_attached_deposit(amount)
+                .near_deposit();
+
+            near_deposit_ps.then(
+                Self::ext(env::current_account_id().clone())
+                    .with_static_gas(GAS_FOR_RESOLVE_WNEAR)
+                    .callback_wnear(
+                        execute_data,
+                        U128(amount),
+                    )
+            ).into()
+        } else {
+            self.internal_transfer_execute(execute_data)
+        }
+    }
+
+    /// transfer and execute
+    #[private]
+    fn internal_transfer_execute(
+        &mut self,
+        execute_data: ExecuteRequest
+    ) -> Promise {
+        let obj = Execute {
+            call_data: execute_data.call_data,
+        };
+        let mut token_id: AccountId;
+        if execute_data.token == "" {
+            token_id = WRAP_NEAR_ACCOUNT.to_string().try_into().unwrap();
+        } else {
+            token_id = execute_data.token.try_into().unwrap();
+        }
+
+        let mut msg = serde_json::to_string(&obj).unwrap();
+        let receiver:AccountId = PROXY_CONTRACT.to_string().try_into().unwrap();
+
+        ext_ft::ext(token_id.clone())
+            .with_static_gas(GAS_FOR_DEPOSIT_AND_EXECUTE)
+            .with_attached_deposit(1)
+            .ft_transfer_call(
+                receiver,
+                U128(execute_data.amount),
+                None,
+                msg,
+            ).then(
+            Self::ext(env::current_account_id().clone())
+                .with_static_gas(GAS_FOR_RESOLVE_BRIDGE)
+                .callback_bridge()
+        ).into()
     }
 
     /// getters
@@ -558,6 +599,49 @@ impl Vault {
     }
 
     /// callbacks
+    #[private]
+    pub fn callback_wnear(&mut self, execute_data: ExecuteRequest, amount: U128) -> PromiseOrValue<U128> {
+        assert_eq!(env::promise_results_count(), 1, "This is a callback method");
+        // handle the result from the first cross contract call this method is a callback for
+        match env::promise_result(0) {
+            PromiseResult::NotReady => unreachable!(),
+            PromiseResult::Failed => {
+                // extract near amount from deposit transaction
+                let amount = amount.0.checked_div(1e15 as u128).unwrap_or(0);
+                env::log_str(format!(
+                    "{} {} {}",
+                    execute_data.incognito_address, NEAR_ADDRESS.to_string(), amount
+                ).as_str());
+                PromiseOrValue::Value(U128(0))
+            },
+            PromiseResult::Successful(_result) => {
+                let transfer_execute_ps: Promise = self.internal_transfer_execute(execute_data);
+                PromiseOrValue::Promise(transfer_execute_ps)
+            }
+        }
+    }
+
+    #[private]
+    pub fn callback_bridge(&mut self) -> PromiseOrValue<U128> {
+        assert_eq!(env::promise_results_count(), 1, "This is a callback method");
+        // handle the result from the first cross contract call this method is a callback for
+        match env::promise_result(0) {
+            PromiseResult::NotReady => unreachable!(),
+            PromiseResult::Failed => {
+                // extract near amount from deposit transaction
+                let amount = amount.checked_div(1e15 as u128).unwrap_or(0);
+                env::log_str(format!(
+                    "{} {} {}",
+                    execute_data.incognito_address, NEAR_ADDRESS.to_string(), amount
+                ).as_str());
+                PromiseOrValue::Value(U128(0))
+            },
+            PromiseResult::Successful(_result) => {
+                PromiseOrValue::Value(U128(0))
+            }
+        }
+    }
+
     #[private]
     pub fn callback_deposit(&mut self, incognito_address: String, token: AccountId, amount: u128) -> PromiseOrValue<U128> {
         assert_eq!(env::promise_results_count(), 2, "This is a callback method");
