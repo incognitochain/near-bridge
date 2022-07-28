@@ -57,8 +57,8 @@ pub struct Proxy {
 #[ext_contract(this_contract)]
 pub trait Callbacks {
     fn callback_wnear(&mut self, account_id: AccountId, amount: U128);
-    fn callback_deposit_ref_finance(&mut self, action: SwapAction, account_id: AccountId);
-    fn callback_swap_ref_finance(&mut self, action: SwapAction, account_id: AccountId);
+    fn callback_deposit_ref_finance(&mut self, action: SwapAction, account_id: AccountId, withdraw_address: String);
+    fn callback_swap_ref_finance(&mut self, action: SwapAction, account_id: AccountId, withdraw_address: String);
     fn callback_withdraw_ref_finance(
         &mut self,
         account_id: AccountId,
@@ -212,6 +212,7 @@ impl Proxy {
                             min_amount_out,
                         },
                         account_id,
+                        "".to_string()
                     )).into()
             }
         }
@@ -341,6 +342,7 @@ impl Proxy {
         &mut self,
         action: SwapAction,
         account_id: AccountId,
+        withdraw_address: String,
     ) -> PromiseOrValue<U128> {
         assert_eq!(env::promise_results_count(), 1, "This is a callback method");
 
@@ -373,6 +375,7 @@ impl Proxy {
                 .callback_swap_ref_finance(
                     action.clone(),
                     account_id,
+                    withdraw_address,
             )).into()
         } else {
             self.internal_deposit_token(
@@ -389,6 +392,7 @@ impl Proxy {
         &mut self,
         action: SwapAction,
         account_id: AccountId,
+        withdraw_address: String,
     ) -> PromiseOrValue<U128> {
         assert_eq!(env::promise_results_count(), 1, "This is a callback method");
 
@@ -417,7 +421,7 @@ impl Proxy {
                 account_id,
                 action.token_in.clone(),
                 action.amount_in.unwrap(),
-                AccountId::new_unchecked("".to_string()),
+                AccountId::new_unchecked(withdraw_address),
                 "".to_string(),
                 "".to_string()
             )).into()
@@ -437,7 +441,7 @@ impl Proxy {
                     account_id,
                     action.token_out.clone(),
                     swap_result.unwrap(),
-                    AccountId::new_unchecked("".to_string()),
+                    AccountId::new_unchecked(withdraw_address),
                     "".to_string(),
                     "".to_string()
                 )).into()
@@ -573,7 +577,7 @@ impl Proxy {
     }
 
     // new flow
-    pub(crate) fn call_dapp_2(&mut self, msg: String) -> Promise {
+    pub(crate) fn call_dapp_2(&mut self, msg: String, withdraw_address: String) -> Promise {
         let sender_id = env::predecessor_account_id();
         assert_eq!(sender_id.to_string(), BRIDGE_CONTRACT);
 
@@ -622,6 +626,7 @@ impl Proxy {
                                 min_amount_out,
                             },
                             account_id,
+                            withdraw_address,
                         )).into()
             }
         }

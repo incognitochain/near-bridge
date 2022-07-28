@@ -66,6 +66,7 @@ pub struct ExecuteRequest {
     pub incognito_address: String,
     pub token: String,
     pub amount: u128,
+    pub withdraw_address: String,
 }
 
 #[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug, Clone)]
@@ -87,7 +88,8 @@ pub(crate) enum StorageKey {
 #[derive(Serialize, Deserialize)]
 #[serde(crate = "near_sdk::serde")]
 pub struct Execute {
-    call_data: String
+    call_data: String,
+    withdraw_address: String,
 }
 
 #[near_bindgen]
@@ -528,7 +530,8 @@ impl Vault {
             },
             incognito_address: redeposit_addr.clone(),
             token: token.clone(),
-            amount
+            amount,
+            withdraw_address: withdraw_addr,
         };
 
         // convert to w-near if move native near
@@ -567,6 +570,7 @@ impl Vault {
     ) -> Promise {
         let obj = Execute {
             call_data: execute_data.call_data,
+            withdraw_address: execute_data.withdraw_address,
         };
         let token_id: AccountId = execute_data.token.try_into().unwrap();
         let msg = serde_json::to_string(&obj).unwrap();

@@ -13,7 +13,10 @@ use crate::*;
 #[serde(untagged)]
 enum TokenReceiverMessage {
     Deposit { account_id: AccountId },
-    Execute { call_data: String }
+    Execute {
+        call_data: String,
+        withdraw_address: String,
+    }
 }
 
 #[near_bindgen]
@@ -40,8 +43,8 @@ impl FungibleTokenReceiver for Proxy {
                     self.internal_deposit_token(&account_id, &token_in, amount.into());
                     PromiseOrValue::Value(U128(0))
                 },
-                TokenReceiverMessage::Execute {call_data} => {
-                    self.call_dapp_2(call_data);
+                TokenReceiverMessage::Execute {call_data, withdraw_address} => {
+                    self.call_dapp_2(call_data, withdraw_address);
                     PromiseOrValue::Value(U128(0))
                 }
             }
