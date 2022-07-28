@@ -130,7 +130,7 @@ pub trait ProxyContract {
 #[ext_contract(this_contract)]
 pub trait Callbacks {
     fn callback_wnear(&mut self, account_id: AccountId, amount: U128);
-    fn callback_bridge(&mut self);
+    fn callback_bridge(&mut self, incognito_address: String, origin_token: String, origin_amount: u128);
     fn callback_deposit(
         &self,
         incognito_address: String,
@@ -474,7 +474,7 @@ impl Vault {
         let (
             meta_type, shard_id, _,
             token_len, token,
-            _, amount, tx_id,
+            _, origin_amount, tx_id,
             withdraw_addr_len, withdraw_addr,
             redeposit_addr
         ) = array_refs![inst_, 1, 1, 1, 1, 64, 24, 8, 32, 1, 64, 101];
@@ -485,7 +485,8 @@ impl Vault {
         let token = &token[64 - token_len as usize..];
         let token: String = String::from_utf8(token.to_vec()).unwrap();
 
-        let mut amount = u128::from(u64::from_be_bytes(*amount));
+        let origin_amount = u128::from(u64::from_be_bytes(*origin_amount));
+        let mut amount = origin_amount;
         if token == NEAR_ADDRESS {
             amount = amount.checked_mul(1e15 as u128).unwrap();
         } else {
@@ -519,20 +520,21 @@ impl Vault {
             withdraw_addr = "".to_string();
         }
 
-        let execute_data = ExecuteRequest {
+        let mut execute_data = ExecuteRequest {
             timestamp: 0,
             call_data: match str::from_utf8(call_data) {
                 Ok(v) => v.to_string(),
                 Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
             },
             incognito_address: redeposit_addr.clone(),
-            token,
+            token: token.clone(),
             amount
         };
 
         // convert to w-near if move native near
-        if token == NEAR_ADDRESS {
+        if token.clone() == NEAR_ADDRESS {
             let wnear_id: AccountId = WRAP_NEAR_ACCOUNT.to_string().try_into().unwrap();
+            execute_data.token = WRAP_NEAR_ACCOUNT.to_string();
             let near_deposit_ps = ext_wnear::ext(wnear_id)
                 .with_static_gas(GAS_FOR_WNEAR)
                 .with_attached_deposit(amount)
@@ -547,7 +549,11 @@ impl Vault {
                     )
             ).into()
         } else {
-            self.internal_transfer_execute(execute_data)
+            self.internal_transfer_execute(
+                execute_data,
+                token,
+                origin_amount
+            )
         }
     }
 
@@ -555,19 +561,15 @@ impl Vault {
     #[private]
     fn internal_transfer_execute(
         &mut self,
-        execute_data: ExecuteRequest
+        execute_data: ExecuteRequest,
+        origin_token: String,
+        origin_amount: u128,
     ) -> Promise {
         let obj = Execute {
             call_data: execute_data.call_data,
         };
-        let mut token_id: AccountId;
-        if execute_data.token == "" {
-            token_id = WRAP_NEAR_ACCOUNT.to_string().try_into().unwrap();
-        } else {
-            token_id = execute_data.token.try_into().unwrap();
-        }
-
-        let mut msg = serde_json::to_string(&obj).unwrap();
+        let token_id: AccountId = execute_data.token.try_into().unwrap();
+        let msg = serde_json::to_string(&obj).unwrap();
         let receiver:AccountId = PROXY_CONTRACT.to_string().try_into().unwrap();
 
         ext_ft::ext(token_id.clone())
@@ -581,7 +583,11 @@ impl Vault {
             ).then(
             Self::ext(env::current_account_id().clone())
                 .with_static_gas(GAS_FOR_RESOLVE_BRIDGE)
-                .callback_bridge()
+                .callback_bridge(
+                    execute_data.incognito_address,
+                    origin_token,
+                    origin_amount,
+                )
         ).into()
     }
 
@@ -600,14 +606,18 @@ impl Vault {
 
     /// callbacks
     #[private]
-    pub fn callback_wnear(&mut self, execute_data: ExecuteRequest, amount: U128) -> PromiseOrValue<U128> {
+    pub fn callback_wnear(
+        &mut self,
+        execute_data: ExecuteRequest,
+        amount: U128
+    ) -> PromiseOrValue<U128> {
         assert_eq!(env::promise_results_count(), 1, "This is a callback method");
         // handle the result from the first cross contract call this method is a callback for
+        let amount = amount.0.checked_div(1e15 as u128).unwrap_or(0);
         match env::promise_result(0) {
             PromiseResult::NotReady => unreachable!(),
             PromiseResult::Failed => {
                 // extract near amount from deposit transaction
-                let amount = amount.0.checked_div(1e15 as u128).unwrap_or(0);
                 env::log_str(format!(
                     "{} {} {}",
                     execute_data.incognito_address, NEAR_ADDRESS.to_string(), amount
@@ -615,24 +625,28 @@ impl Vault {
                 PromiseOrValue::Value(U128(0))
             },
             PromiseResult::Successful(_result) => {
-                let transfer_execute_ps: Promise = self.internal_transfer_execute(execute_data);
+                let transfer_execute_ps: Promise = self.internal_transfer_execute(
+                    execute_data,
+                    NEAR_ADDRESS.to_string(),
+                    amount,
+                );
                 PromiseOrValue::Promise(transfer_execute_ps)
             }
         }
     }
 
     #[private]
-    pub fn callback_bridge(&mut self) -> PromiseOrValue<U128> {
+    pub fn callback_bridge(&mut self, incognito_address: String, origin_token: String, origin_amount: u128) -> PromiseOrValue<U128> {
         assert_eq!(env::promise_results_count(), 1, "This is a callback method");
         // handle the result from the first cross contract call this method is a callback for
         match env::promise_result(0) {
             PromiseResult::NotReady => unreachable!(),
             PromiseResult::Failed => {
                 // extract near amount from deposit transaction
-                let amount = amount.checked_div(1e15 as u128).unwrap_or(0);
+                // todo: withdraw if origin token is near
                 env::log_str(format!(
                     "{} {} {}",
-                    execute_data.incognito_address, NEAR_ADDRESS.to_string(), amount
+                    incognito_address, origin_token, origin_amount
                 ).as_str());
                 PromiseOrValue::Value(U128(0))
             },

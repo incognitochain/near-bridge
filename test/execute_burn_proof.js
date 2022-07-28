@@ -113,7 +113,7 @@ const web3 = new Web3();
     const utf8Encode = new TextEncoder();
     let sourceToken = "wrap.testnet";
     let destToken = "usdc.fakes.testnet";
-    let amount = "10000000000000000000000";
+    let amount = "100000000000000000000";
     let obj = {
         action: {
             pool_id: 54,

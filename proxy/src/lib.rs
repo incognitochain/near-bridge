@@ -260,6 +260,7 @@ impl Proxy {
     }
 
     //todo: handle fail cases
+    // pass withdraw address from vault
     #[private]
     fn internal_withdraw(
         &mut self,
@@ -269,10 +270,10 @@ impl Proxy {
         msg: String,
         incognito_address: String,
     ) -> Promise {
-        let bridge_id = BRIDGE_CONTRACT.to_string().try_into().unwrap();
+        let bridge_id: AccountId = BRIDGE_CONTRACT.to_string().try_into().unwrap();
         let is_withdraw = receiver != bridge_id;
-
-        if withdraw_token_id != WRAP_NEAR_ACCOUNT.clone().try_into().unwrap() {
+        let wnear: AccountId = WRAP_NEAR_ACCOUNT.to_string().try_into().unwrap();
+        if withdraw_token_id != wnear {
             if is_withdraw {
                 ext_ft::ext(withdraw_token_id.clone())
                     .with_static_gas(GAS_FOR_DEPOSIT_BRIDGE)
@@ -301,7 +302,7 @@ impl Proxy {
                 .near_withdraw(
                     U128(withdraw_amount - 1),
                 );
-            let mut deposit_ps = Promise::new(receiver).transfer(amount);
+            let mut deposit_ps = Promise::new(receiver).transfer(withdraw_amount);
             if !is_withdraw {
                 deposit_ps = ext_bridge::ext(bridge_id)
                     .with_static_gas(GAS_FOR_DEPOSIT_BRIDGE)
@@ -347,7 +348,7 @@ impl Proxy {
             PromiseResult::NotReady => unreachable!(),
             PromiseResult::Failed => false,
             PromiseResult::Successful(result) => {
-                let used_amount: u128 = near_sdk::serde_json::from_slice::<U128>(&result)
+                let used_amount: u128 = serde_json::from_slice::<U128>(&result)
                     .unwrap()
                     .into();
                 match used_amount {
@@ -416,9 +417,9 @@ impl Proxy {
                 account_id,
                 action.token_in.clone(),
                 action.amount_in.unwrap(),
-                AccountId("".as_str()),
-                "".as_str(),
-                "".as_str()
+                AccountId::new_unchecked("".to_string()),
+                "".to_string(),
+                "".to_string()
             )).into()
         } else {
             let withdraw_ps = ext_ref_finance::ext(ref_finance_id)
@@ -436,9 +437,9 @@ impl Proxy {
                     account_id,
                     action.token_out.clone(),
                     swap_result.unwrap(),
-                    AccountId("".as_str()),
-                    "".as_str(),
-                    "".as_str()
+                    AccountId::new_unchecked("".to_string()),
+                    "".to_string(),
+                    "".to_string()
                 )).into()
         }
     }

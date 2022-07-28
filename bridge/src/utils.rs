@@ -19,6 +19,7 @@ pub const GAS_FOR_FT_TRANSFER: Gas = Gas(27_000_000_000_000);
 pub const GAS_FOR_RESOLVE_DEPOSIT: Gas = Gas(5_000_000_000_000);
 pub const GAS_FOR_RETRIEVE_INFO: Gas = Gas(1_000_000_000_000);
 pub const GAS_FOR_EXECUTE: Gas = Gas(176_000_000_000_000);
+// todo update gas properly
 pub const GAS_FOR_RESOLVE_EXECUTE: Gas = Gas(20_000_000_000_000);
 pub const GAS_FOR_WITHDRAW: Gas = Gas(72_000_000_000_000);
 pub const GAS_FOR_RESOLVE_WITHDRAW: Gas = Gas(20_000_000_000_000);
