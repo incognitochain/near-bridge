@@ -44,7 +44,7 @@ impl FungibleTokenReceiver for Proxy {
                     PromiseOrValue::Value(U128(0))
                 },
                 TokenReceiverMessage::Execute {call_data, withdraw_address} => {
-                    self.call_dapp_2(call_data, withdraw_address);
+                    self.call_dapp_2(call_data, withdraw_address, sender_id);
                     PromiseOrValue::Value(U128(0))
                 }
             }

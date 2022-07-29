@@ -754,6 +754,17 @@ mod tests {
     use near_sdk::test_utils::{accounts, VMContextBuilder};
     use near_sdk::{testing_env, Balance, MockedBlockchain};
 
+    #[derive(Serialize, Deserialize, Debug)]
+    #[serde(crate = "near_sdk::serde")]
+    #[serde(untagged)]
+    enum TokenReceiverMessage {
+        Deposit { account_id: AccountId },
+        Execute {
+            call_data: String,
+            withdraw_address: String,
+        }
+    }
+
     /// Creates contract and a pool with tokens with 0.3% of total fee.
     fn setup_contract() -> (VMContextBuilder, Vault) {
         let mut context = VMContextBuilder::new();
@@ -827,6 +838,15 @@ mod tests {
         print!("Actual {:?} \n", hex::encode(result));
         print!("Expect {:?}", hex::encode(secret.public().address()));
         assert_eq!(hex::encode(result), hex::encode(secret.public().address()));
+    }
+
+    #[test]
+    fn test_parse_msg() {
+        // test decode
+        let msg = "{\"call_data\":\"{\\\"action\\\":{\\\"pool_id\\\":54,\\\"token_in\\\":\\\"wrap.testnet\\\",\\\"amount_in\\\":\\\"100000000000000000000\\\",\\\"token_out\\\":\\\"usdc.fakes.testnet\\\",\\\"min_amount_out\\\":\\\"1\\\"},\\\"account_id\\\":\\\"496add2c24e17711d9512172901b5502df37e10493d247c371eb8dc3e4b173fc\\\"}\",\"withdraw_address\":\"\"}".to_string();
+        let message =
+            serde_json::from_str::<TokenReceiverMessage>(&msg).expect("wrong format");
+        print!("message: {:?} \n", message);
     }
 
     #[test]

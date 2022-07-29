@@ -68,7 +68,7 @@ const { connect } = nearAPI;
             amount: "10000000000000000000000",
             msg: '{"incognito_address": "' + incognitoAddress + '"}'
         },
-        "50000000000000",
+        "60000000000000",
         "1"
     );
 

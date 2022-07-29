@@ -23,9 +23,9 @@ use crate::errors::*;
 use crate::ref_finance::ext_ref_finance;
 use crate::utils::{
     BRIDGE_CONTRACT, GAS_FOR_DEPOSIT_BRIDGE, GAS_FOR_DEPOSIT_REF,
-    GAS_FOR_RESOLVE_DEPOSIT_REF_FINANCE, GAS_FOR_RESOLVE_SWAP_REF_FINANCE,
-    GAS_FOR_RESOLVE_WITHDRAW_REF_FINANCE, GAS_FOR_RESOLVE_WNEAR,
-    GAS_FOR_SWAP_REF_FINANCE, GAS_FOR_WITHDRAW_REF_FINANCE, GAS_FOR_WNEAR, REF_FINANCE_ACCOUNT,
+    GAS_FOR_RESOLVE_DEPOSIT_REF_FINANCE, GAS_FOR_RESOLVE_WNEAR,
+    GAS_FOR_SWAP_REF_FINANCE, GAS_FOR_WITHDRAW_REF_FINANCE,
+    GAS_FOR_WNEAR, REF_FINANCE_ACCOUNT, GAS_FOR_RESOLVE_DEPOSIT_SWAP_WITHDRAW,
 };
 use crate::w_near::ext_wnear;
 
@@ -371,7 +371,7 @@ impl Proxy {
                     Some(env::current_account_id()),
                 )
             .then(Self::ext(env::current_account_id())
-                .with_static_gas(GAS_FOR_RESOLVE_SWAP_REF_FINANCE)
+                .with_static_gas(env::prepaid_gas() - env::used_gas() - GAS_FOR_SWAP_REF_FINANCE)
                 .callback_swap_ref_finance(
                     action.clone(),
                     account_id,
@@ -416,7 +416,7 @@ impl Proxy {
                 );
 
             withdraw_ps.then(Self::ext(env::current_account_id())
-            .with_static_gas(GAS_FOR_RESOLVE_WITHDRAW_REF_FINANCE)
+            .with_static_gas(env::prepaid_gas() - env::used_gas() - GAS_FOR_WITHDRAW_REF_FINANCE)
             .callback_withdraw_ref_finance(
                 account_id,
                 action.token_in.clone(),
@@ -436,7 +436,7 @@ impl Proxy {
                 );
 
             withdraw_ps.then(Self::ext(env::current_account_id())
-                .with_static_gas(GAS_FOR_RESOLVE_WITHDRAW_REF_FINANCE)
+                .with_static_gas(env::prepaid_gas() - env::used_gas() - GAS_FOR_WITHDRAW_REF_FINANCE)
                 .callback_withdraw_ref_finance(
                     account_id,
                     action.token_out.clone(),
@@ -577,8 +577,7 @@ impl Proxy {
     }
 
     // new flow
-    pub(crate) fn call_dapp_2(&mut self, msg: String, withdraw_address: String) -> Promise {
-        let sender_id = env::predecessor_account_id();
+    pub(crate) fn call_dapp_2(&mut self, msg: String, withdraw_address: String, sender_id: AccountId) -> Promise {
         assert_eq!(sender_id.to_string(), BRIDGE_CONTRACT);
 
         let message = serde_json::from_str::<DappRequest>(&msg).expect(WRONG_MSG_FORMAT);
@@ -616,7 +615,7 @@ impl Proxy {
 
                 ft_transfer_call_ps
                     .then(Self::ext(env::current_account_id())
-                        .with_static_gas(GAS_FOR_RESOLVE_DEPOSIT_REF_FINANCE)
+                        .with_static_gas(GAS_FOR_RESOLVE_DEPOSIT_SWAP_WITHDRAW)
                         .callback_deposit_ref_finance(
                             SwapAction {
                                 pool_id,
@@ -635,7 +634,6 @@ impl Proxy {
 
 mod tests {
     use super::*;
-    use near_sdk::serde_json;
 
     #[test]
     fn test_serialize() {
