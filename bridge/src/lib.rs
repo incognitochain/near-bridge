@@ -18,17 +18,7 @@ use near_sdk::{env, near_bindgen, BorshStorageKey, PanicOnDefault, ext_contract,
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::collections::{LookupMap, TreeMap};
 use crate::errors::*;
-use crate::utils::{
-    PROXY_CONTRACT, NEAR_ADDRESS,
-    WITHDRAW_INST_LEN, SWAP_COMMITTEE_INST_LEN,
-    WITHDRAW_METADATA, SWAP_BEACON_METADATA,
-    BURN_METADATA, GAS_FOR_FT_TRANSFER,
-    GAS_FOR_EXECUTE, GAS_FOR_WITHDRAW,
-    EXECUTE_BURN_PROOF, EXECUTE_BURN_PROOF_METADATA,
-    WRAP_NEAR_ACCOUNT, GAS_FOR_WNEAR,
-    GAS_FOR_RESOLVE_WNEAR, GAS_FOR_RESOLVE_BRIDGE,
-    GAS_FOR_DEPOSIT_AND_EXECUTE
-};
+use crate::utils::{PROXY_CONTRACT, NEAR_ADDRESS, WITHDRAW_INST_LEN, SWAP_COMMITTEE_INST_LEN, WITHDRAW_METADATA, SWAP_BEACON_METADATA, BURN_METADATA, GAS_FOR_FT_TRANSFER, GAS_FOR_EXECUTE, GAS_FOR_WITHDRAW, EXECUTE_BURN_PROOF, EXECUTE_BURN_PROOF_METADATA, WRAP_NEAR_ACCOUNT, GAS_FOR_WNEAR, GAS_FOR_RESOLVE_WNEAR, GAS_FOR_RESOLVE_BRIDGE, GAS_FOR_DEPOSIT_AND_EXECUTE, GAS_FOR_RESOLVE_UNSHIELD, GAS_FOR_RESOLVE_WITHDRAW};
 use crate::utils::{verify_inst, extract_verifier};
 use arrayref::{array_refs, array_ref};
 use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
@@ -90,6 +80,7 @@ pub(crate) enum StorageKey {
 pub struct Execute {
     call_data: String,
     withdraw_address: String,
+    incognito_address: String
 }
 
 #[near_bindgen]
@@ -151,6 +142,11 @@ pub trait Callbacks {
         source_token: String,
         request_id: String,
     ) -> Promise;
+
+    fn callback_withdraw(
+        &self,
+        burn_tx: &[u8; 32],
+    );
 }
 
 /// Message parameters to receive via token function call.
@@ -261,7 +257,13 @@ impl Vault {
                     account,
                     U128(unshield_amount),
                     None,
-                )
+                ).then(
+                    Self::ext(env::current_account_id().clone())
+                        .with_static_gas(GAS_FOR_RESOLVE_WITHDRAW)
+                        .callback_withdraw(
+                            tx_id
+                        )
+            ).into()
         }
     }
 
@@ -571,10 +573,12 @@ impl Vault {
         let obj = Execute {
             call_data: execute_data.call_data,
             withdraw_address: execute_data.withdraw_address,
+            incognito_address: execute_data.incognito_address.clone(),
         };
-        let token_id: AccountId = execute_data.token.try_into().unwrap();
         let msg = serde_json::to_string(&obj).unwrap();
+        // todo: update proxy address from burn meta data
         let receiver:AccountId = PROXY_CONTRACT.to_string().try_into().unwrap();
+        let token_id: AccountId = execute_data.token.try_into().unwrap();
 
         ext_ft::ext(token_id.clone())
             .with_static_gas(GAS_FOR_DEPOSIT_AND_EXECUTE)
@@ -743,6 +747,25 @@ impl Vault {
             request_id,
             temp,
         )
+    }
+
+    #[private]
+    pub fn callback_withdraw(
+        &mut self,
+        burn_id: &[u8; 32],
+    ) {
+        assert_eq!(env::promise_results_count(), 1, "This is a callback method");
+
+        let withdraw_success: bool = match env::promise_result(0) {
+            PromiseResult::NotReady => unreachable!(),
+            PromiseResult::Failed => false,
+            PromiseResult::Successful(_result) => true,
+        };
+
+        if !withdraw_success {
+            // unmark withdraw and check withdraw gas provided
+            self.tx_burn.insert(&burn_id, &false);
+        }
     }
 }
 

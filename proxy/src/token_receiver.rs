@@ -16,6 +16,7 @@ enum TokenReceiverMessage {
     Execute {
         call_data: String,
         withdraw_address: String,
+        incognito_address: String
     }
 }
 
@@ -43,8 +44,8 @@ impl FungibleTokenReceiver for Proxy {
                     self.internal_deposit_token(&account_id, &token_in, amount.into());
                     PromiseOrValue::Value(U128(0))
                 },
-                TokenReceiverMessage::Execute {call_data, withdraw_address} => {
-                    self.call_dapp_2(call_data, withdraw_address, sender_id);
+                TokenReceiverMessage::Execute {call_data, withdraw_address, incognito_address} => {
+                    self.call_dapp_2(call_data, withdraw_address, sender_id, incognito_address);
                     PromiseOrValue::Value(U128(0))
                 }
             }

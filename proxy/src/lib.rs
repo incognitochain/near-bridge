@@ -26,6 +26,7 @@ use crate::utils::{
     GAS_FOR_RESOLVE_DEPOSIT_REF_FINANCE, GAS_FOR_RESOLVE_WNEAR,
     GAS_FOR_SWAP_REF_FINANCE, GAS_FOR_WITHDRAW_REF_FINANCE,
     GAS_FOR_WNEAR, REF_FINANCE_ACCOUNT, GAS_FOR_RESOLVE_DEPOSIT_SWAP_WITHDRAW,
+    PADDING_GAS,
 };
 use crate::w_near::ext_wnear;
 
@@ -57,7 +58,13 @@ pub struct Proxy {
 #[ext_contract(this_contract)]
 pub trait Callbacks {
     fn callback_wnear(&mut self, account_id: AccountId, amount: U128);
-    fn callback_deposit_ref_finance(&mut self, action: SwapAction, account_id: AccountId, withdraw_address: String);
+    fn callback_deposit_ref_finance(
+        &mut self,
+        action: SwapAction,
+        account_id: AccountId,
+        withdraw_address: String,
+        incognito_address: String,
+    ) -> PromiseOrValue<U128>;
     fn callback_swap_ref_finance(&mut self, action: SwapAction, account_id: AccountId, withdraw_address: String);
     fn callback_withdraw_ref_finance(
         &mut self,
@@ -212,7 +219,8 @@ impl Proxy {
                             min_amount_out,
                         },
                         account_id,
-                        "".to_string()
+                        "".to_string(),
+                        "".to_string(),
                     )).into()
             }
         }
@@ -241,13 +249,8 @@ impl Proxy {
         }
         self.internal_withdraw_token(&account_id, &withdraw_token_id, withdraw_amount);
         let mut receiver: AccountId = BRIDGE_CONTRACT.to_string().try_into().unwrap();
-        let obj = Deposit {
-            incognito_address: incognito_address.clone(),
-        };
-        let mut msg = serde_json::to_string(&obj).unwrap();
         if !withdraw_address.clone().is_empty() {
             // not withdraw NEAR
-            msg = "".to_string();
             receiver = withdraw_address.clone().try_into().unwrap();
         }
 
@@ -255,7 +258,6 @@ impl Proxy {
             withdraw_token_id,
             receiver,
             withdraw_amount,
-            msg,
             incognito_address,
         )
     }
@@ -268,7 +270,6 @@ impl Proxy {
         withdraw_token_id: AccountId,
         receiver: AccountId,
         withdraw_amount: u128,
-        msg: String,
         incognito_address: String,
     ) -> Promise {
         let bridge_id: AccountId = BRIDGE_CONTRACT.to_string().try_into().unwrap();
@@ -285,6 +286,10 @@ impl Proxy {
                         None,
                     )
             } else {
+                let obj = Deposit {
+                    incognito_address: incognito_address.clone(),
+                };
+                let mut msg = serde_json::to_string(&obj).unwrap();
                 ext_ft::ext(withdraw_token_id.clone())
                     .with_static_gas(GAS_FOR_DEPOSIT_BRIDGE)
                     .with_attached_deposit(1)
@@ -343,6 +348,7 @@ impl Proxy {
         action: SwapAction,
         account_id: AccountId,
         withdraw_address: String,
+        incognito_address: String,
     ) -> PromiseOrValue<U128> {
         assert_eq!(env::promise_results_count(), 1, "This is a callback method");
 
@@ -371,13 +377,15 @@ impl Proxy {
                     Some(env::current_account_id()),
                 )
             .then(Self::ext(env::current_account_id())
-                .with_static_gas(env::prepaid_gas() - env::used_gas() - GAS_FOR_SWAP_REF_FINANCE)
+                .with_static_gas(env::prepaid_gas() - env::used_gas() - GAS_FOR_SWAP_REF_FINANCE - PADDING_GAS)
                 .callback_swap_ref_finance(
                     action.clone(),
                     account_id,
                     withdraw_address,
+                    incognito_address,
             )).into()
         } else {
+            // todo: update to call deposit in vault for new flow
             self.internal_deposit_token(
                 &account_id,
                 &action.token_in.clone(),
@@ -393,6 +401,7 @@ impl Proxy {
         action: SwapAction,
         account_id: AccountId,
         withdraw_address: String,
+        incognito_address: String,
     ) -> PromiseOrValue<U128> {
         assert_eq!(env::promise_results_count(), 1, "This is a callback method");
 
@@ -403,8 +412,14 @@ impl Proxy {
                 .unwrap()
                 .into(),
         };
-
         let ref_finance_id: AccountId = REF_FINANCE_ACCOUNT.to_string().try_into().unwrap();
+        let withdraw_id: AccountId;
+        if withdraw_address.is_empty() {
+            withdraw_id = BRIDGE_CONTRACT.to_string().try_into().unwrap();
+        } else {
+            // todo: validate address and handle error
+            withdraw_id = withdraw_address.try_into().unwrap();
+        }
         if swap_result.is_none() {
             let withdraw_ps = ext_ref_finance::ext(ref_finance_id)
                 .with_static_gas(GAS_FOR_WITHDRAW_REF_FINANCE)
@@ -416,14 +431,13 @@ impl Proxy {
                 );
 
             withdraw_ps.then(Self::ext(env::current_account_id())
-            .with_static_gas(env::prepaid_gas() - env::used_gas() - GAS_FOR_WITHDRAW_REF_FINANCE)
+            .with_static_gas(env::prepaid_gas() - env::used_gas() - GAS_FOR_WITHDRAW_REF_FINANCE - PADDING_GAS)
             .callback_withdraw_ref_finance(
                 account_id,
                 action.token_in.clone(),
                 action.amount_in.unwrap(),
-                AccountId::new_unchecked(withdraw_address),
-                "".to_string(),
-                "".to_string()
+                withdraw_id,
+                incognito_address,
             )).into()
         } else {
             let withdraw_ps = ext_ref_finance::ext(ref_finance_id)
@@ -436,14 +450,13 @@ impl Proxy {
                 );
 
             withdraw_ps.then(Self::ext(env::current_account_id())
-                .with_static_gas(env::prepaid_gas() - env::used_gas() - GAS_FOR_WITHDRAW_REF_FINANCE)
+                .with_static_gas(env::prepaid_gas() - env::used_gas() - GAS_FOR_WITHDRAW_REF_FINANCE - PADDING_GAS)
                 .callback_withdraw_ref_finance(
                     account_id,
                     action.token_out.clone(),
                     swap_result.unwrap(),
-                    AccountId::new_unchecked(withdraw_address),
-                    "".to_string(),
-                    "".to_string()
+                    withdraw_id,
+                    incognito_address,
                 )).into()
         }
     }
@@ -455,7 +468,6 @@ impl Proxy {
         token_id: AccountId,
         amount: U128,
         receiver: AccountId,
-        msg: String,
         incognito_address: String,
     ) -> PromiseOrValue<U128> {
         assert_eq!(env::promise_results_count(), 1, "This is a callback method");
@@ -469,7 +481,6 @@ impl Proxy {
                         token_id,
                         receiver,
                         amount.0,
-                        msg,
                         incognito_address,
                     );
                     PromiseOrValue::Promise(withdraw)
@@ -577,7 +588,13 @@ impl Proxy {
     }
 
     // new flow
-    pub(crate) fn call_dapp_2(&mut self, msg: String, withdraw_address: String, sender_id: AccountId) -> Promise {
+    pub(crate) fn call_dapp_2(
+        &mut self,
+        msg: String,
+        withdraw_address: String,
+        sender_id: AccountId,
+        incognito_address: String
+    ) -> Promise {
         assert_eq!(sender_id.to_string(), BRIDGE_CONTRACT);
 
         let message = serde_json::from_str::<DappRequest>(&msg).expect(WRONG_MSG_FORMAT);
@@ -626,6 +643,7 @@ impl Proxy {
                             },
                             account_id,
                             withdraw_address,
+                            incognito_address,
                         )).into()
             }
         }
