@@ -18,8 +18,7 @@ use near_sdk::{env, near_bindgen, BorshStorageKey, PanicOnDefault, ext_contract,
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::collections::{LookupMap, TreeMap};
 use crate::errors::*;
-use crate::utils::{PROXY_CONTRACT, NEAR_ADDRESS, WITHDRAW_INST_LEN, SWAP_COMMITTEE_INST_LEN, WITHDRAW_METADATA, SWAP_BEACON_METADATA, BURN_METADATA, GAS_FOR_FT_TRANSFER, GAS_FOR_EXECUTE, GAS_FOR_WITHDRAW, EXECUTE_BURN_PROOF, EXECUTE_BURN_PROOF_METADATA, WRAP_NEAR_ACCOUNT, GAS_FOR_WNEAR, GAS_FOR_RESOLVE_WNEAR, GAS_FOR_RESOLVE_BRIDGE, GAS_FOR_DEPOSIT_AND_EXECUTE, GAS_FOR_RESOLVE_UNSHIELD, GAS_FOR_RESOLVE_WITHDRAW};
-use crate::utils::{verify_inst, extract_verifier};
+use crate::utils::*;
 use arrayref::{array_refs, array_ref};
 use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
 use near_sdk::json_types::U128;
@@ -57,6 +56,7 @@ pub struct ExecuteRequest {
     pub token: String,
     pub amount: u128,
     pub withdraw_address: String,
+    pub external_id: AccountId,
 }
 
 #[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug, Clone)]
@@ -122,7 +122,7 @@ pub trait ProxyContract {
 // define methods we'll use as callbacks on ContractA
 #[ext_contract(this_contract)]
 pub trait Callbacks {
-    fn callback_wnear(&mut self, account_id: AccountId, amount: U128);
+    fn callback_wnear(&mut self, execute_data: ExecuteRequest);
     fn callback_bridge(&mut self, incognito_address: String, origin_token: String, origin_amount: u128);
     fn callback_deposit(
         &self,
@@ -142,10 +142,14 @@ pub trait Callbacks {
         source_token: String,
         request_id: String,
     ) -> Promise;
-
     fn callback_withdraw(
         &self,
         burn_tx: &[u8; 32],
+    );
+    fn callback_wnear_withdraw(
+        &mut self,
+        incognito_address: String,
+        amount: u128,
     );
 }
 
@@ -473,21 +477,26 @@ impl Vault {
         let inst_ = array_ref![inst, 0, EXECUTE_BURN_PROOF];
         // extract data from instruction
         // removed external call address
-        // layout: meta(1), shard(1), network(1), extToken(32), amount(32), txID(32), withdrawAddr(32), redepositAddr(101), extCalldata(*)
+        // layout: meta(1), shard(1), network(1), extCallAddr(32), extToken(32), amount(32), txID(32), withdrawAddr(32), redepositAddr(101), extCalldata(*)
         #[allow(clippy::ptr_offset_with_cast)]
         let (
             meta_type, shard_id, _,
+            ext_call_addr_len, ext_call_addr,
             token_len, token,
             _, origin_amount, tx_id,
             withdraw_addr_len, withdraw_addr,
             redeposit_addr
-        ) = array_refs![inst_, 1, 1, 1, 1, 64, 24, 8, 32, 1, 64, 101];
+        ) = array_refs![inst_, 1, 1, 1, 1, 64, 1, 64, 24, 8, 32, 1, 64, 101];
         let meta_type = u8::from_be_bytes(*meta_type);
         let shard_id = u8::from_be_bytes(*shard_id);
 
         let token_len = u8::from_be_bytes(*token_len);
         let token = &token[64 - token_len as usize..];
         let token: String = String::from_utf8(token.to_vec()).unwrap();
+
+        let ext_call_addr_len = u8::from_be_bytes(*ext_call_addr_len);
+        let ext_call_addr = &ext_call_addr[64 - ext_call_addr_len as usize..];
+        let ext_call_addr: String = String::from_utf8(ext_call_addr.to_vec()).unwrap();
 
         let origin_amount = u128::from(u64::from_be_bytes(*origin_amount));
         let mut amount = origin_amount;
@@ -534,6 +543,7 @@ impl Vault {
             token: token.clone(),
             amount,
             withdraw_address: withdraw_addr,
+            external_id: ext_call_addr.try_into().unwrap(),
         };
 
         // convert to w-near if move native near
@@ -550,7 +560,6 @@ impl Vault {
                     .with_static_gas(GAS_FOR_RESOLVE_WNEAR)
                     .callback_wnear(
                         execute_data,
-                        U128(amount),
                     )
             ).into()
         } else {
@@ -576,15 +585,13 @@ impl Vault {
             incognito_address: execute_data.incognito_address.clone(),
         };
         let msg = serde_json::to_string(&obj).unwrap();
-        // todo: update proxy address from burn meta data
-        let receiver:AccountId = PROXY_CONTRACT.to_string().try_into().unwrap();
         let token_id: AccountId = execute_data.token.try_into().unwrap();
 
         ext_ft::ext(token_id.clone())
             .with_static_gas(GAS_FOR_DEPOSIT_AND_EXECUTE)
             .with_attached_deposit(1)
             .ft_transfer_call(
-                receiver,
+                execute_data.external_id,
                 U128(execute_data.amount),
                 None,
                 msg,
@@ -617,11 +624,10 @@ impl Vault {
     pub fn callback_wnear(
         &mut self,
         execute_data: ExecuteRequest,
-        amount: U128
     ) -> PromiseOrValue<U128> {
         assert_eq!(env::promise_results_count(), 1, "This is a callback method");
         // handle the result from the first cross contract call this method is a callback for
-        let amount = amount.0.checked_div(1e15 as u128).unwrap_or(0);
+        let amount = execute_data.amount.clone().checked_div(1e15 as u128).unwrap_or(0);
         match env::promise_result(0) {
             PromiseResult::NotReady => unreachable!(),
             PromiseResult::Failed => {
@@ -651,17 +657,56 @@ impl Vault {
             PromiseResult::NotReady => unreachable!(),
             PromiseResult::Failed => {
                 // extract near amount from deposit transaction
-                // todo: withdraw if origin token is near
-                env::log_str(format!(
-                    "{} {} {}",
-                    incognito_address, origin_token, origin_amount
-                ).as_str());
-                PromiseOrValue::Value(U128(0))
+                if origin_token == NEAR_ADDRESS.to_string() {
+                    let wnear_id: AccountId = WRAP_NEAR_ACCOUNT.to_string().try_into().unwrap();
+                    let near_withdraw_ps = ext_wnear::ext(wnear_id)
+                        .with_static_gas(GAS_FOR_WNEAR)
+                        .near_withdraw(U128(origin_amount.checked_mul(1e15 as u128).unwrap_or(0)));
+
+                    near_withdraw_ps.then(
+                        Self::ext(env::current_account_id().clone())
+                            .with_static_gas(GAS_FOR_RESOLVE_WNEAR_WITHDRAW)
+                            .callback_wnear_withdraw(
+                                incognito_address,
+                                origin_amount,
+                            )
+                    ).into()
+                } else {
+                    env::log_str(format!(
+                        "{} {} {}",
+                        incognito_address, origin_token, origin_amount
+                    ).as_str());
+                    PromiseOrValue::Value(U128(0))
+                }
             },
             PromiseResult::Successful(_result) => {
                 PromiseOrValue::Value(U128(0))
             }
         }
+    }
+
+    #[private]
+    pub fn callback_wnear_withdraw(
+        &mut self,
+        incognito_address: String,
+        amount: u128,
+    ) {
+        assert_eq!(env::promise_results_count(), 1, "This is a callback method");
+
+        let withdraw_success: bool = match env::promise_result(0) {
+            PromiseResult::NotReady => unreachable!(),
+            PromiseResult::Failed => false,
+            PromiseResult::Successful(_result) => true,
+        };
+        let mut token = NEAR_ADDRESS;
+        if !withdraw_success {
+            token = WRAP_NEAR_ACCOUNT;
+        }
+        env::log_str(format!(
+            "{} {} {}",
+            incognito_address, token, amount
+        ).as_str());
+
     }
 
     #[private]

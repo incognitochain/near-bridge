@@ -8,7 +8,7 @@ pub const PROXY_CONTRACT: &str = "f1a6da2001ca6e98c2e4720619b413c882bd3e5d5e7997
 pub const WITHDRAW_METADATA: u8 = 157;
 pub const SWAP_BEACON_METADATA: u8 = 158;
 pub const BURN_METADATA: u8 = 160;
-pub const EXECUTE_BURN_PROOF: usize = 298;
+pub const EXECUTE_BURN_PROOF: usize = 363;
 pub const EXECUTE_BURN_PROOF_METADATA: u8 = 160;
 
 pub const NEAR_ADDRESS: &str = "0";
@@ -24,10 +24,11 @@ pub const GAS_FOR_WITHDRAW: Gas = Gas(72_000_000_000_000);
 pub const GAS_FOR_RESOLVE_WITHDRAW: Gas = Gas(20_000_000_000_000);
 pub const WRAP_NEAR_ACCOUNT: &str = "wrap.testnet";
 pub const GAS_FOR_WNEAR: Gas = Gas(10_000_000_000_000);
-pub const GAS_FOR_RESOLVE_WNEAR: Gas = Gas(260_000_000_000_000);
-pub const GAS_FOR_RESOLVE_BRIDGE: Gas = Gas(2_000_000_000_000);
+pub const GAS_FOR_RESOLVE_WNEAR: Gas = Gas(261_000_000_000_000);
+pub const GAS_FOR_RESOLVE_BRIDGE: Gas = Gas(12_000_000_000_000);
 pub const GAS_FOR_DEPOSIT_AND_EXECUTE: Gas = Gas(260_000_000_000_000);
 pub const GAS_FOR_RESOLVE_UNSHIELD: Gas = Gas(10_000_000_000_000);
+pub const GAS_FOR_RESOLVE_WNEAR_WITHDRAW: Gas = Gas(1_000_000_000_000);
 
 pub fn verify_inst(
     request_info: &InteractRequest, beacons: Vec<String>,
