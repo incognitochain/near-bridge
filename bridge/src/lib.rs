@@ -11,16 +11,13 @@ mod utils;
 
 use std::str;
 use std::cmp::Ordering;
-use std::convert::{TryFrom, TryInto};
-use near_sdk::{serde_json};
+use std::convert::{TryInto};
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
-use near_sdk::{env, near_bindgen, BorshStorageKey, PanicOnDefault, ext_contract, PromiseResult, AccountId, Gas, Promise, PromiseOrValue};
+use near_sdk::{env, near_bindgen, BorshStorageKey, PanicOnDefault, ext_contract, PromiseResult, AccountId, Promise, PromiseOrValue, StorageUsage, Balance};
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::collections::{LookupMap, TreeMap};
 use crate::errors::*;
-use crate::utils::{NEAR_ADDRESS, WITHDRAW_INST_LEN, SWAP_COMMITTEE_INST_LEN, WITHDRAW_METADATA, SWAP_BEACON_METADATA, BURN_METADATA};
-use crate::utils::{GAS_FOR_FT_TRANSFER};
-use crate::utils::{verify_inst};
+use crate::utils::*;
 use arrayref::{array_refs, array_ref};
 use near_contract_standards::fungible_token::metadata::FungibleTokenMetadata;
 use near_sdk::json_types::U128;
@@ -53,7 +50,6 @@ pub struct InteractRequest {
 pub(crate) enum StorageKey {
     Transaction,
     BeaconHeight,
-    TokenDecimals,
 }
 
 #[near_bindgen]
@@ -63,8 +59,10 @@ pub struct Vault {
     pub tx_burn: LookupMap<[u8; 32], bool>,
     // beacon committees
     pub beacons: TreeMap<u128, Vec<String>>,
-    // store token decimal
-    pub token_decimals: LookupMap<String, u8>,
+    // unshield storage
+    pub unshield_storage_usage:  StorageUsage,
+    // storage usage per beacon
+    pub beacon_storage_usage:  StorageUsage,
 }
 
 // define the methods we'll use on ContractB
@@ -76,13 +74,24 @@ pub trait FtContract {
 }
 
 // define methods we'll use as callbacks on ContractA
-#[ext_contract(ext_self)]
-pub trait VaultContract {
+#[ext_contract(this_contract)]
+pub trait Callbacks {
     fn callback_deposit(
         &self,
         incognito_address: String,
         token: AccountId,
         amount: u128,
+    );
+    fn callback_withdraw(
+        &self,
+        tx_id: &[u8; 32],
+        token: AccountId,
+        account: AccountId,
+        unshield_amount: u128,
+    ) -> PromiseOrValue<U128>;
+    fn callback_resolve_withdraw(
+        &self,
+        tx_id: &[u8; 32],
     );
 }
 
@@ -99,8 +108,21 @@ impl Vault {
         let mut this = Self {
             tx_burn: LookupMap::new(StorageKey::Transaction), 
             beacons: TreeMap::new(StorageKey::BeaconHeight),
-            token_decimals: LookupMap::new(StorageKey::TokenDecimals),
+            unshield_storage_usage: env::storage_usage(),
+            beacon_storage_usage: env::storage_usage(),
         };
+        let initial_storage_usage = env::storage_usage();
+        // calculate near needed on each action
+        // unshield
+        let tx_id : &[u8; 32] = &[0xff; 32];
+        this.tx_burn.insert(&tx_id, &true);
+        this.unshield_storage_usage = env::storage_usage() - initial_storage_usage;
+        this.tx_burn.remove(&tx_id);
+        // beacon
+        let beacon = vec!["a".repeat(64)];
+        this.beacons.insert(&1, &beacon);
+        this.beacon_storage_usage = env::storage_usage() - initial_storage_usage;
+        this.beacons.remove(&1);
         // insert beacon height and list in tree
         this.beacons.insert(&height, &beacons);
 
@@ -132,10 +154,16 @@ impl Vault {
     /// withdraw tokens
     ///
     /// submit burn proof to receive token
+    #[payable]
     pub fn withdraw(
         &mut self,
         unshield_info: InteractRequest
     ) -> Promise {
+        // check storage staking first
+        if env::attached_deposit() < Balance::from(self.unshield_storage_usage) * env::storage_byte_cost() {
+            env::panic_str("The attached deposit is less than the minimum storage balance");
+        }
+
         let beacons = self.get_beacons(unshield_info.height);
 
         // verify instruction
@@ -173,25 +201,27 @@ impl Vault {
             unshield_amount = unshield_amount.checked_mul(1e15 as u128).unwrap();
             Promise::new(account).transfer(unshield_amount)
         } else {
-            let decimals = self.token_decimals.get(&token).unwrap();
-            if decimals > 9 {
-                unshield_amount = unshield_amount.checked_mul(u128::pow(10, decimals as u32 - 9)).unwrap()
-            }
             let token: AccountId = token.try_into().unwrap();
-            ext_ft::ft_transfer(
-                account,
-                U128(unshield_amount),
-                None,
-                token,
-                1,
-                GAS_FOR_FT_TRANSFER,
-            ).into()
+            ext_ft::ext(token.clone())
+                .with_static_gas(GAS_FOR_RETRIEVE_INFO)
+                .ft_metadata()
+                .then(
+                    Self::ext(env::current_account_id().clone())
+                    .with_static_gas(GAS_FOR_WITHDRAW)
+                    .callback_withdraw(
+                        tx_id,
+                        token,
+                        account,
+                        unshield_amount,
+                    )
+                ).into()
         }
     }
 
     /// swap beacon committee
     ///
     /// verify old beacon committee's signature and update new beacon committee
+    #[payable]
     pub fn swap_beacon_committee(
         &mut self,
         swap_info: InteractRequest
@@ -212,6 +242,11 @@ impl Vault {
         let prev_height = u128::from_be_bytes(*prev_height);
         let height = u128::from_be_bytes(*height);
         let num_vals = u128::from_be_bytes(*num_vals);
+
+        // check storage staking
+        if env::attached_deposit() < Balance::from(self.beacon_storage_usage) * env::storage_byte_cost() * num_vals {
+            env::panic_str("The attached deposit is less than the minimum storage balance");
+        }
 
         let mut beacons: Vec<String> = vec![];
         for i in 0..num_vals {
@@ -236,49 +271,6 @@ impl Vault {
         true
     }
 
-
-    // submit burn proof
-    //
-    // prepare fund to call contract
-    pub fn submit_burn_proof(
-        &mut self,
-        burn_info: InteractRequest
-    ) {
-        let beacons = self.get_beacons(burn_info.height);
-
-        // verify instruction
-        verify_inst(&burn_info, beacons);
-
-        // parse instruction
-        let inst = hex::decode(burn_info.inst).unwrap_or_default();
-        let inst_ = array_ref![inst, 0, WITHDRAW_INST_LEN];
-        #[allow(clippy::ptr_offset_with_cast)]
-        let (meta_type, shard_id, token_len, token, receiver_len, receiver_key, _, burn_amount, tx_id) =
-            array_refs![inst_, 1, 1, 1, 64, 1, 64, 24, 8, 32];
-        let meta_type = u8::from_be_bytes(*meta_type);
-        let shard_id = u8::from_be_bytes(*shard_id);
-        let burn_amount = u128::from(u64::from_be_bytes(*burn_amount));
-        let token_len = u8::from_be_bytes(*token_len);
-        let receiver_len = u8::from_be_bytes(*receiver_len);
-        let token = &token[64 - token_len as usize..];
-        let token: String = String::from_utf8(token.to_vec()).unwrap_or_default();
-        let receiver_key = &receiver_key[64 - receiver_len as usize..];
-        let receiver_key: String = String::from_utf8(receiver_key.to_vec()).unwrap_or_default();
-
-        // validate metatype and key provided
-        if (meta_type != BURN_METADATA) || shard_id != 1 {
-            panic!("{}", INVALID_METADATA);
-        }
-
-        // check tx burn used
-        if self.tx_burn.get(&tx_id).unwrap_or_default() {
-            panic!("{}", INVALID_TX_BURN);
-        }
-        self.tx_burn.insert(&tx_id, &true);
-    }
-
-
-
     /// getters
 
     /// get beacon list by height
@@ -292,7 +284,14 @@ impl Vault {
         self.tx_burn.get(tx_id).unwrap_or_default()
     }
 
+    /// get storage cost unit on swap and unshield actions
+    pub fn get_storage(self) -> (StorageUsage, StorageUsage) {
+        return (self.beacon_storage_usage, self.unshield_storage_usage)
+    }
+
     /// callbacks
+
+    #[private]
     pub fn callback_deposit(&mut self, incognito_address: String, token: AccountId, amount: u128) -> PromiseOrValue<U128> {
         assert_eq!(env::promise_results_count(), 2, "This is a callback method");
 
@@ -324,11 +323,6 @@ impl Vault {
             panic!("{}", VALUE_EXCEEDED)
         }
 
-        let decimals_stored = self.token_decimals.get(&token.to_string()).unwrap_or_default();
-        if decimals_stored == 0 {
-            self.token_decimals.insert(&token.to_string(), &token_meta_data.decimals);
-        }
-
         env::log_str(
             format!(
                 "{} {} {}",
@@ -337,11 +331,90 @@ impl Vault {
 
         PromiseOrValue::Value(U128(0))
     }
+
+    #[private]
+    pub fn callback_withdraw(
+        &mut self,
+        tx_id: &[u8; 32],
+        token: AccountId,
+        account: AccountId,
+        unshield_amount: u128,
+    ) -> PromiseOrValue<U128> {
+        assert_eq!(env::promise_results_count(), 1, "This is a callback method");
+
+        // handle the result from the second cross contract call this method is a callback for
+        let (token_meta_data, success) = match env::promise_result(0) {
+            PromiseResult::NotReady => unreachable!(),
+            PromiseResult::Failed => (
+                FungibleTokenMetadata{
+                    spec: "".to_string(),
+                    name: "".to_string(),
+                    symbol: "".to_string(),
+                    icon: None,
+                    reference: None,
+                    reference_hash: None,
+                    decimals: 0,
+                }, 
+                false
+            ),
+            PromiseResult::Successful(result) => (
+                near_sdk::serde_json::from_slice::<FungibleTokenMetadata>(&result).unwrap(),
+                true
+            ),
+        };
+
+        if !success {
+            // unmark withdraw
+            self.tx_burn.remove(&tx_id);
+
+            return PromiseOrValue::Value(U128(0));
+        }
+
+        let mut amount = unshield_amount;
+        if token_meta_data.decimals > 9 {
+            amount = amount.checked_mul(u128::pow(10, token_meta_data.decimals as u32 - 9)).unwrap()
+        }
+
+        ext_ft::ext(token)
+            .with_static_gas(GAS_FOR_FT_TRANSFER)
+            .with_attached_deposit(1)
+            .ft_transfer(
+                account,
+                U128(amount),
+                None,
+            ).then(
+            Self::ext(env::current_account_id().clone())
+                .with_static_gas(GAS_FOR_RESOLVE_WITHDRAW)
+                .callback_resolve_withdraw(
+                    tx_id
+                )
+            ).into()
+    }
+
+    #[private]
+    pub fn callback_resolve_withdraw(
+        &mut self,
+        tx_id: &[u8; 32],
+    ) {
+        assert_eq!(env::promise_results_count(), 1, "This is a callback method");
+
+        let withdraw_success: bool = match env::promise_result(0) {
+            PromiseResult::NotReady => unreachable!(),
+            PromiseResult::Failed => false,
+            PromiseResult::Successful(_result) => true,
+        };
+
+        if !withdraw_success {
+            // unmark withdraw and check withdraw gas provided
+            self.tx_burn.remove(&tx_id);
+        }
+    }
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
+    use near_sdk::{serde_json};
 
     fn to_32_bytes(hex_str: &str) -> [u8; 32] {
         let bytes = hex::decode(hex_str).unwrap();
