@@ -31,13 +31,10 @@ const { connect } = nearAPI;
     };
     const near = await connect(config);
     const senderAccount = await near.account(SENDER_ADDRESS)
-    // const tokenAccount = await near.account(TOKEN_ADDRESS)
-
-    
 
     console.log({senderAddress: senderAccount});
 
-    const contractId = "496add2c24e17711d9512172901b5502df37e10493d247c371eb8dc3e4b173fc";
+    const contractId = "near.bridge.incognito_chain.testnet";
     console.log(contractId);
 
     const contract = new nearAPI.Contract(
@@ -52,7 +49,7 @@ const { connect } = nearAPI;
     // register account id
     await contract.storage_deposit(
         {
-            account_id: "prv-test-shield.testnet",
+            account_id: contractId,
             registration_only: true,
         },
         "300000000000000",

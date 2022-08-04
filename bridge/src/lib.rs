@@ -160,8 +160,9 @@ impl Vault {
         unshield_info: InteractRequest
     ) -> Promise {
         // check storage staking first
-        if env::attached_deposit() < Balance::from(self.unshield_storage_usage) * env::storage_byte_cost() {
-            env::panic_str("The attached deposit is less than the minimum storage balance");
+        let minimum_amount = Balance::from(self.unshield_storage_usage) * env::storage_byte_cost();
+        if env::attached_deposit() < minimum_amount {
+            env::panic_str(format!("The attached deposit is less than the minimum storage balance, need at least {}", minimum_amount).as_str());
         }
 
         let beacons = self.get_beacons(unshield_info.height);
@@ -174,14 +175,15 @@ impl Vault {
         let inst_ = array_ref![inst, 0, WITHDRAW_INST_LEN];
         #[allow(clippy::ptr_offset_with_cast)]
         let (meta_type, shard_id, token_len, token, receiver_len, receiver_key, _, unshield_amount, tx_id) =
-            array_refs![inst_, 1, 1, 1, 64, 1, 64, 24, 8, 32];
+            array_refs![inst_, 1, 1, 1, 67, 1, 64, 24, 8, 32];
         let meta_type = u8::from_be_bytes(*meta_type);
         let shard_id = u8::from_be_bytes(*shard_id);
         let mut unshield_amount = u128::from(u64::from_be_bytes(*unshield_amount));
-        let token_len = u8::from_be_bytes(*token_len);
-        let receiver_len = u8::from_be_bytes(*receiver_len);
-        let token = &token[64 - token_len as usize..];
+        // remove 3 byte prefix NER
+        let token_len = u8::from_be_bytes(*token_len).checked_sub(3).unwrap_or_else(|| env::panic_str("invalid token length"));
+        let token = &token[67 - token_len as usize..];
         let token: String = String::from_utf8(token.to_vec()).unwrap_or_default();
+        let receiver_len = u8::from_be_bytes(*receiver_len);
         let receiver_key = &receiver_key[64 - receiver_len as usize..];
         let receiver_key: String = String::from_utf8(receiver_key.to_vec()).unwrap_or_default();
 
@@ -244,8 +246,9 @@ impl Vault {
         let num_vals = u128::from_be_bytes(*num_vals);
 
         // check storage staking
-        if env::attached_deposit() < Balance::from(self.beacon_storage_usage) * env::storage_byte_cost() * num_vals {
-            env::panic_str("The attached deposit is less than the minimum storage balance");
+        let minimum_amount = Balance::from(self.beacon_storage_usage) * env::storage_byte_cost() * num_vals;
+        if env::attached_deposit() < minimum_amount {
+            env::panic_str(format!("The attached deposit is less than the minimum storage balance, need at least {}", minimum_amount).as_str());
         }
 
         let mut beacons: Vec<String> = vec![];

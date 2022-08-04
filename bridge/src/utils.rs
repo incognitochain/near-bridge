@@ -2,11 +2,11 @@ use crate::{errors::*, InteractRequest};
 use near_sdk::{env, Gas};
 
 
-pub const WITHDRAW_METADATA: u8 = 159;
+pub const WITHDRAW_METADATA: u8 = 157;
 pub const SWAP_BEACON_METADATA: u8 = 71;
 
 pub const NEAR_ADDRESS: &str = "0";
-pub const WITHDRAW_INST_LEN: usize = 1 + 1 + 1 + 64 + 1 + 64 + 32 + 32; // ignore last 64 bytes in instruction
+pub const WITHDRAW_INST_LEN: usize = 1 + 1 + 1 + 67 + 1 + 64 + 32 + 32; // ignore last 64 bytes in instruction
 pub const SWAP_COMMITTEE_INST_LEN: usize = 1 + 1 + 32 + 32 + 32;
 
 pub const GAS_FOR_FT_TRANSFER: Gas = Gas(30_000_000_000_000);

@@ -36,7 +36,7 @@ const axios = require('axios');
 
     console.log({senderAddress: senderAccount});
 
-    const contractId = "496add2c24e17711d9512172901b5502df37e10493d247c371eb8dc3e4b173fc";
+    const contractId = "near.bridge.incognito_chain.testnet";
     console.log(contractId);
 
     const contract = new nearAPI.Contract(
@@ -56,7 +56,7 @@ const axios = require('axios');
                 "jsonrpc": "1.0",
                 "method": "getnearburnproof",
                 "params": [
-                    "c6182a66fd38c4820cc3b9c2c856731a5df29d8bc8e106502c177a76d4ceb1db"
+                    "6eb6d604fcef6eca621486318ac31ad5910da0a49bfa9d30267b608fba6f1469"
                 ],
                 "id": 1
             }
@@ -91,7 +91,7 @@ const axios = require('axios');
             unshield_info: unshieldInfo,
         },
         "300000000000000",
-        "0"
+        "740000000000000000000"
     );
 
 })();
