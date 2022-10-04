@@ -2,7 +2,7 @@ use crate::{errors::*, InteractRequest};
 use near_sdk::{env, Gas};
 
 
-pub const WITHDRAW_METADATA: u8 = 157;
+pub const WITHDRAW_METADATA: u8 = 163;
 pub const SWAP_BEACON_METADATA: u8 = 71;
 
 pub const NEAR_ADDRESS: &str = "0";
