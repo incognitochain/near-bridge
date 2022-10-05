@@ -10,6 +10,7 @@
   "license": "ISC",
   "dependencies": {
     "axios": "^0.27.2",
+    "ethers": "^5.7.1",
     "fs": "0.0.1-security",
     "near-api-js": "^0.44.2"
   }

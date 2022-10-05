@@ -1,5 +1,6 @@
 const nearAPI = require("near-api-js");
 const fs = require('fs');
+const ethers = require("ethers");
 // creates keyStore from a private key string
 // you can define your key here or use an environment variable
 
@@ -34,7 +35,7 @@ const { connect } = nearAPI;
 
     console.log({senderAddress: senderAccount});
 
-    const contractId = "near.bridge.incognito_chain.testnet";
+    const contractId = "incognito.prv.testnet";
     console.log(contractId);
 
     const contract = new nearAPI.Contract(
@@ -56,6 +57,21 @@ const { connect } = nearAPI;
         "130000000000000000000000"
     );
 
+    // regulator key
+    const hexPrivateKey = "0x98452cb9c013387c2f5806417fe198a0de014594678e2f9d3223d7e7e921b04d";
+    const signingKey = new ethers.utils.SigningKey(hexPrivateKey);
+    const tx = "65bQNcfAKdfLzZZFsW9KECnQ8JFADQFocMEtTapkEpbp";
+    const shieldInfo = JSON.stringify(
+        {
+            sender: SENDER_ADDRESS,
+            tx,
+        }
+    );
+    const signature = signingKey.signDigest(ethers.utils.id(shieldInfo));
+    console.log({shieldInfo});
+    console.log({"signature" : ethers.utils.joinSignature(signature).slice(0, -2) + '0' + signature.recoveryParam.toString()});
+    const regulator_signature = (ethers.utils.joinSignature(signature).slice(0, -2) + '0' + signature.recoveryParam.toString()).slice(2);
+
     // make shield Near request
     const incognitoAddress = "12svfkP6w5UDJDSCwqH978PvqiqBxKmUnA9em9yAYWYJVRv7wuXY1qhhYpPAm4BDz2mLbFrRmdK3yRhnTqJCZXKHUmoi7NV83HCH2YFpctHNaDdkSiQshsjw2UFUuwdEvcidgaKmF3VJpY5f8RdN";
     await contract.ft_transfer_call(
@@ -63,8 +79,7 @@ const { connect } = nearAPI;
             sender_id: "cuongcute.testnet",
             receiver_id: contractId,
             amount: "10000000000",
-            // todo: update message with regulator signature
-            msg: '{"incognito_address": "' + incognitoAddress + '"}'
+            msg: '{"incognito_address": "' + incognitoAddress + '", "tx": "' + tx + '", "signature": "' + regulator_signature + '"}'
         },
         "300000000000000",
         "1"

@@ -1,5 +1,5 @@
 const nearAPI = require("near-api-js");
-const fs = require('fs');
+const ethers = require('ethers');
 // creates keyStore from a private key string
 // you can define your key here or use an environment variable
 
@@ -36,7 +36,7 @@ const { connect } = nearAPI;
     let balance = await account.getAccountBalance();
     console.log({balance});
 
-    const contractId = "near.bridge.incognito_chain.testnet";
+    const contractId = "incognito.prv.testnet";
 
     const beacon1 = "3cD69B1A595B7A9589391538d29ee7663326e4d3";
     const beacon2 = "c687470342f4E80ECEf6bBd25e276266d40b8429";
@@ -55,34 +55,49 @@ const { connect } = nearAPI;
     );
 
     // init bridge contract
-    await contract.new(
-        {
-            args: {
-                beacons: [
-                    beacon1,
-                    beacon2,
-                    beacon3,
-                    beacon4
-                ],
-                height: 0,
-            },
-            gas: "300000000000000",
-            amount: "0"
-        },
-    );
+    // await contract.new(
+    //     {
+    //         args: {
+    //             beacons: [
+    //                 beacon1,
+    //                 beacon2,
+    //                 beacon3,
+    //                 beacon4
+    //             ],
+    //             height: 0,
+    //         },
+    //         gas: "300000000000000",
+    //         amount: "0"
+    //     },
+    // );
 
     const beaconlist = await contract.get_beacons({
         height: 0
     });
     console.log({beaconlist});
 
+    // regulator key
+    const hexPrivateKey = "0x98452cb9c013387c2f5806417fe198a0de014594678e2f9d3223d7e7e921b04d";
+    const signingKey = new ethers.utils.SigningKey(hexPrivateKey);
+    const tx = "65bQNcfAKdfLzZZFsW9KECnQ8JFADQFocMEtTapkEpbp";
+    const shieldInfo = JSON.stringify(
+        {
+            sender: testAddress,
+            tx,
+        }
+    ); //'{"sender":"incognito.deployer.testnet","tx":"65bQNcfAKdfLzZZFsW9KECnQ8JFADQFocMEtTapkEpbp"}';
+    const signature = signingKey.signDigest(ethers.utils.id(shieldInfo));
+    console.log({shieldInfo});
+    console.log({"signature" : ethers.utils.joinSignature(signature).slice(0, -2) + '0' + signature.recoveryParam.toString()});
+
     // make shield Near request
     const incognitoAddress = "12svfkP6w5UDJDSCwqH978PvqiqBxKmUnA9em9yAYWYJVRv7wuXY1qhhYpPAm4BDz2mLbFrRmdK3yRhnTqJCZXKHUmoi7NV83HCH2YFpctHNaDdkSiQshsjw2UFUuwdEvcidgaKmF3VJpY5f8RdN";
     await contract.deposit(
         {
             args: {
-                incognito_address: incognitoAddress
-                // todo: update message with regulator signature
+                incognito_address: incognitoAddress,
+                tx,
+                signature: (ethers.utils.joinSignature(signature).slice(0, -2) + '0' + signature.recoveryParam.toString()).slice(2)
             },
             gas: "300000000000000",
             amount: "1000000000000000000000"
