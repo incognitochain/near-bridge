@@ -1,5 +1,5 @@
-use crate::{errors::*, InteractRequest};
-use near_sdk::{env, Gas};
+use crate::{errors::*, InteractRequest, ShieldInfo};
+use near_sdk::{env, Gas, serde_json};
 
 
 pub const WITHDRAW_METADATA: u8 = 163;
@@ -14,6 +14,7 @@ pub const GAS_FOR_RESOLVE_DEPOSIT: Gas = Gas(20_000_000_000_000);
 pub const GAS_FOR_RETRIEVE_INFO: Gas = Gas(2_000_000_000_000);
 pub const GAS_FOR_WITHDRAW: Gas = Gas(35_000_000_000_000);
 pub const GAS_FOR_RESOLVE_WITHDRAW: Gas = Gas(1_000_000_000_000);
+pub const REGULATOR: &str = "dbeCBd9F55922e6487b24B4Fed572D5BF4982562";
 
 pub fn verify_inst(
     request_info: &InteractRequest, beacons: Vec<String>,
@@ -38,16 +39,17 @@ pub fn verify_inst(
 
         // verify beacon signature
         for i in 0..request_info.indexes.len() {
-            let (s_r, v) = (hex::decode(request_info.signatures[i].clone()).unwrap_or_default(), request_info.vs[i]);
+            let (r_s, v) = (hex::decode(request_info.signatures[i].clone()).unwrap_or_default(), request_info.vs[i]);
             let index_beacon = request_info.indexes[i];
             let beacon_key = beacons[index_beacon as usize].clone();
             let recover_key = env::ecrecover(
                 &blk,
-                s_r.as_slice(),
+                r_s.as_slice(),
                 v,
                 false,
             ).unwrap();
-            if !hex::encode(recover_key).eq(beacon_key.as_str()) {
+            let recover_bytes = env::keccak256_array(recover_key.as_slice());
+            if !hex::encode(&recover_bytes[12..]).eq(beacon_key.to_lowercase().as_str()) {
                 panic!("{}", INVALID_BEACON_SIGNATURE);
             }
         }
@@ -100,4 +102,24 @@ fn instruction_in_merkle_tree(
         build_root = env::keccak256_array(&temp[..]);
     }
     build_root == *root
+}
+
+pub fn verify_regulator(
+    shield_info: ShieldInfo,
+    signature: String,
+) -> bool {
+    let message = env::keccak256_array(serde_json::to_string(&shield_info).unwrap_or_default().as_bytes());
+    let sign_bytes = hex::decode(signature).unwrap_or_default();
+    if sign_bytes.len() != 65 {
+        return false;
+    }
+    let recover_key = env::ecrecover(
+        &message,
+        &sign_bytes[0..64],
+        sign_bytes[64],
+        false,
+    ).unwrap();
+    let recover_bytes = env::keccak256_array(recover_key.as_slice());
+
+    hex::encode(&recover_bytes[12..]).eq(&REGULATOR.to_lowercase())
 }

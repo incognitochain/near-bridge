@@ -11,3 +11,4 @@ pub const INVALID_MERKLE_TREE: &str = "merkle tree root is not match";
 pub const VALUE_EXCEEDED: &str = "the total balance greater than max value allowed to shield";
 pub const PREV_COMMITTEE_HEIGHT_MISMATCH: &str = "Previous committee height mismatch";
 pub const COMMITTEE_HEIGHT_MISMATCH: &str = "Committee height mismatch";
+pub const INVALID_REGULATOR_SIG: &str = "Invalid regulator signature";

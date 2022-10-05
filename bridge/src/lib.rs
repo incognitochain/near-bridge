@@ -5,6 +5,8 @@ NOTES:
   - Swap beacon
 */
 
+extern crate core;
+
 mod token_receiver;
 mod errors;
 mod utils;
@@ -44,6 +46,13 @@ pub struct InteractRequest {
     pub signatures: Vec<String>,
     // v value
     pub vs: Vec<u8>
+}
+
+#[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Debug, Clone)]
+#[serde(crate = "near_sdk::serde")]
+pub struct ShieldInfo {
+    pub sender: String,
+    pub tx: String,
 }
 
 #[derive(BorshStorageKey, BorshSerialize)]
@@ -137,7 +146,17 @@ impl Vault {
     pub fn deposit(
         &mut self,
         incognito_address: String,
+        tx: String,
+        signature: String,
     ) {
+        assert!(verify_regulator(
+            ShieldInfo {
+                    sender: env::predecessor_account_id().to_string(),
+                    tx
+                },
+                signature
+        ), "{}", INVALID_REGULATOR_SIG);
+
         let total_native = env::account_balance();
         if total_native.checked_div(1e15 as u128).unwrap_or_default().cmp(&(u64::MAX as u128)) == Ordering::Greater {
             panic!("{}", VALUE_EXCEEDED);
@@ -417,13 +436,33 @@ impl Vault {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
+    use ethsign::{SecretKey};
+    use near_contract_standards::fungible_token::FungibleToken;
+    use near_contract_standards::fungible_token::receiver::FungibleTokenReceiver;
+    use near_contract_standards::non_fungible_token::metadata::TokenMetadata;
+    use near_contract_standards::non_fungible_token::Token;
     use near_sdk::{serde_json};
+    use near_sdk::test_utils::{accounts, VMContextBuilder};
+    use near_sdk::{testing_env};
+    use crate::token_receiver::TokenReceiverMessage;
 
     fn to_32_bytes(hex_str: &str) -> [u8; 32] {
         let bytes = hex::decode(hex_str).unwrap();
         let mut bytes_ = [0u8; 32];
         bytes_.copy_from_slice(&bytes);
         bytes_
+    }
+
+    /// Creates contract and a pool with tokens with 0.3% of total fee.
+    fn setup_contract() -> (VMContextBuilder, Vault) {
+        let mut context = VMContextBuilder::new();
+        testing_env!(context.predecessor_account_id(accounts(0)).build());
+        let contract = Vault::new(
+            vec!["45e6d8d759bc5993097236e5f2d17053969f0b769bb1d0f8e222b6c40a0f6af345e6d8d759bc5993097236e5f2d17053969f0b769bb1d0f8e222b6c40a0f6af3".to_string()],
+            0
+        );
+
+        (context, contract)
     }
 
     #[test]
@@ -446,5 +485,58 @@ mod tests {
         };
         let msg_str = serde_json::to_string(&msg_obj).unwrap();
         println!("{}", msg_str);
+    }
+
+    #[test]
+    fn test_verify_regulator() {
+        let request = ShieldInfo {
+            sender: "incognito.deployer.testnet".to_string(),
+            tx: "65bQNcfAKdfLzZZFsW9KECnQ8JFADQFocMEtTapkEpbp".to_string(),
+        };
+        let private_key = hex::decode("98452cb9c013387c2f5806417fe198a0de014594678e2f9d3223d7e7e921b04d").unwrap();
+        let secret = SecretKey::from_raw(private_key.as_slice()).unwrap();
+        let message = serde_json::to_string(&request).unwrap();
+        let data = env::keccak256(message.as_bytes());
+        // Sign the message
+        let signature = secret.sign(data.as_slice()).unwrap();
+        let regulator_sig = format!("{}{}{}{}", hex::encode(signature.r), hex::encode(signature.s), 0, signature.v);
+        println!("Regulator signature {:?}", regulator_sig);
+
+        assert_eq!(verify_regulator(request, regulator_sig), true)
+    }
+
+    #[test]
+    fn test_compliance_shield() {
+        let request = ShieldInfo {
+            sender: accounts(0).to_string(),
+            tx: "65bQNcfAKdfLzZZFsW9KECnQ8JFADQFocMEtTapkEpbp".to_string(),
+        };
+        let private_key = hex::decode("98452cb9c013387c2f5806417fe198a0de014594678e2f9d3223d7e7e921b04d").unwrap();
+        let secret = SecretKey::from_raw(private_key.as_slice()).unwrap();
+        let message = serde_json::to_string(&request.clone()).unwrap();
+        let data = env::keccak256(message.as_bytes());
+        let signature = secret.sign(data.as_slice()).unwrap();
+        let regulator_sig = format!("{}{}{}{}", hex::encode(signature.r), hex::encode(signature.s), 0, signature.v);
+        let (mut context, mut contract) = setup_contract();
+        let incognito_addr = "12svfkP6w5UDJDSCwqH978PvqiqBxKmUnA9em9yAYWYJVRv7wuXY1qhhYpPAm4BDz2mLbFrRmdK3yRhnTqJCZXKHUmoi7NV83HCH2YFpctHNaDdkSiQshsjw2UFUuwdEvcidgaKmF3VJpY5f8RdN";
+        contract.deposit(
+            incognito_addr.to_string(),
+            request.clone().tx,
+            regulator_sig.clone(),
+        );
+
+        // test shield FT
+        let msg_obj: TokenReceiverMessage = TokenReceiverMessage::Deposit {
+            incognito_address: incognito_addr.to_string(),
+            tx: request.clone().tx,
+            signature: regulator_sig,
+        };
+
+        let msg_str = serde_json::to_string(&msg_obj).unwrap();
+        contract.ft_on_transfer(
+            AccountId::new_unchecked(request.sender),
+            U128(100),
+            msg_str
+        );
     }
 }

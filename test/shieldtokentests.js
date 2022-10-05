@@ -63,6 +63,7 @@ const { connect } = nearAPI;
             sender_id: "cuongcute.testnet",
             receiver_id: contractId,
             amount: "10000000000",
+            // todo: update message with regulator signature
             msg: '{"incognito_address": "' + incognitoAddress + '"}'
         },
         "300000000000000",
