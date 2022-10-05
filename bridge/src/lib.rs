@@ -274,7 +274,7 @@ impl Vault {
         for i in 0..num_vals {
             let index = i as usize;
             let beacon_key = array_ref![inst, SWAP_COMMITTEE_INST_LEN + index * 32, 32];
-            let beacon = hex::encode(beacon_key);
+            let beacon = hex::encode(&beacon_key[12..]);
             beacons.push(beacon);
         }
 
