@@ -36,7 +36,7 @@ const axios = require('axios');
 
     console.log({senderAddress: senderAccount});
 
-    const contractId = "near.bridge.incognito_chain.testnet";
+    const contractId = "incognito.prv.testnet";
     console.log(contractId);
 
     const contract = new nearAPI.Contract(
@@ -56,7 +56,7 @@ const axios = require('axios');
                 "jsonrpc": "1.0",
                 "method": "getnearburnproof",
                 "params": [
-                    "6eb6d604fcef6eca621486318ac31ad5910da0a49bfa9d30267b608fba6f1469"
+                    "796e834f10aa35b79d61cff428aaf4ae21a6796a3d6f4f4711ccd3ae87459c05"
                 ],
                 "id": 1
             }
