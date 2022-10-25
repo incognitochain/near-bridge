@@ -36,12 +36,24 @@ const { connect } = nearAPI;
     let balance = await account.getAccountBalance();
     console.log({balance});
 
-    const contractId = "incognito.prv.testnet";
+    const contractId = "inc.prv.testnet";
 
-    const beacon1 = "3cD69B1A595B7A9589391538d29ee7663326e4d3";
-    const beacon2 = "c687470342f4E80ECEf6bBd25e276266d40b8429";
-    const beacon3 = "2A40c96b41AdEc5641F28eF923e270B73e29bb53";
-    const beacon4 = "131B772A9ADe1793F000024eAb23b77bEd3BFe64";
+    const beacon_list = [
+        // testnet
+        // "7ef17C60cAa1c5C43d2Af62726c8f7c14000AB02",
+        // "Fe30C03E5Db66236a82b0Dd204E811444Ba7761E",
+        // "a357789d21e217FE3a30c7320A867B8B47C793A4",
+        // "cc817963abe49569Ac58f1BC047B38cDA95832a1",
+
+        // mainnet
+        "e1fe6bdb4FB5f80801D242480c5467c1de94719c",
+        "D57Dc32f9753a20Af166F9Dc48dE22355A9F7c83",
+        "44b39171D742C2CdFdA0EBb6226f8584CAfc57FC",
+        "4c8b59d24f07192B9095DA1EAE9af5c890413A71",
+        "6d678311c5DAf5F8c8c48223C7Aea2A49D8d8B12",
+        "93114859F53F98dC2a1FA6be9340Ce3B1D74722B",
+        "0c7d24b75bEc5E94924e8e5d6c793609e48e7FF6",
+    ];
 
     const contract = new nearAPI.Contract(
         account, // the account object that is connecting
@@ -55,21 +67,16 @@ const { connect } = nearAPI;
     );
 
     // init bridge contract
-    // await contract.new(
-    //     {
-    //         args: {
-    //             beacons: [
-    //                 beacon1,
-    //                 beacon2,
-    //                 beacon3,
-    //                 beacon4
-    //             ],
-    //             height: 0,
-    //         },
-    //         gas: "300000000000000",
-    //         amount: "0"
-    //     },
-    // );
+    await contract.new(
+        {
+            args: {
+                beacons: beacon_list,
+                height: 0,
+            },
+            gas: "300000000000000",
+            amount: "0"
+        },
+    );
 
     const beaconlist = await contract.get_beacons({
         height: 0

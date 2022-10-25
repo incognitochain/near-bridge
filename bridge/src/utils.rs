@@ -14,7 +14,7 @@ pub const GAS_FOR_RESOLVE_DEPOSIT: Gas = Gas(20_000_000_000_000);
 pub const GAS_FOR_RETRIEVE_INFO: Gas = Gas(2_000_000_000_000);
 pub const GAS_FOR_WITHDRAW: Gas = Gas(35_000_000_000_000);
 pub const GAS_FOR_RESOLVE_WITHDRAW: Gas = Gas(1_000_000_000_000);
-pub const REGULATOR: &str = "dbeCBd9F55922e6487b24B4Fed572D5BF4982562";
+pub const REGULATOR: &str = "86a879cF735B0F462F4659bFAADD91F84Ed61aB3"; // mainnet
 
 pub fn verify_inst(
     request_info: &InteractRequest, beacons: Vec<String>,

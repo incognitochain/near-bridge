@@ -6,18 +6,15 @@ const fs = require('fs');
 // creates keyStore from a private key string
 // you can define your key here or use an environment variable
 
-const { keyStores, KeyPair } = nearAPI;
+const { keyStores, KeyPair, connect } = nearAPI;
 const keyStore = new keyStores.InMemoryKeyStore();
-const PRIVATE_KEY =
-    "2EZvXozYRirEoGJKEraa4fRsCZm3wm997gKvkqFiLEeuWK5HGcaXm776V7UyGD37fJZK7vNdjZfHsPoivvCPjXao";
-// creates a public / private key pair using the provided private key
-const keyPair = KeyPair.fromString(PRIVATE_KEY);
-console.log({keyPair});
-const { connect } = nearAPI;
 
 (async () => {
-    const pk58 = 'ed25519:GVNapxiWxGXuc1m8nftuvjj7394G2XGGtXGZmhxKZNgv'
-    const testAddress = "near.bridge.incognito_chain.testnet";
+    const testAddress = "inc.prv.testnet";
+    const PRIVATE_KEY_TESTNET =
+        "2EZvXozYRirEoGJKEraa4fRsCZm3wm997gKvkqFiLEeuWK5HGcaXm776V7UyGD37fJZK7vNdjZfHsPoivvCPjXao";
+    // creates a public / private key pair using the provided private key
+    const keyPair = KeyPair.fromString(PRIVATE_KEY_TESTNET);
 
     // adds the keyPair you created to keyStore
     await keyStore.setKey("testnet", testAddress, keyPair);
@@ -29,16 +26,32 @@ const { connect } = nearAPI;
         helperUrl: "https://helper.testnet.near.org",
         explorerUrl: "https://explorer.testnet.near.org",
     };
-    const near = await connect(config);
-    const account = await near.account(testAddress);
+
+    const connectionConfig = {
+        networkId: "mainnet",
+        keyStore,
+        nodeUrl: "https://rpc.mainnet.near.org",
+        walletUrl: "https://wallet.mainnet.near.org",
+        helperUrl: "https://helper.mainnet.near.org",
+        explorerUrl: "https://explorer.mainnet.near.org",
+    };
+
+    const address = "incognito_chain.near";
+    const PRIVATE_KEY_MAINNET = "{}";
+    // creates a public / private key pair using the provided private key
+    const keyPair_main = KeyPair.fromString(PRIVATE_KEY_MAINNET);
+    await keyStore.setKey("mainnet", address, keyPair_main);
+
+    const near = await connect(connectionConfig);
+    // const account = await near.account(testAddress);
     console.log({testAddress});
-    // const account = await near.account("incognito.bridge.testnet");
+    const account = await near.account(address);
     // await account.createAccount(
-    //     "near.bridge.incognito_chain.testnet", // new account name
-    //     "DqFNkvBJtkbNG8b1DnPtSiDgVaG4TGeCsEzzwwWN9BNP", // public key for new account
+    //     "inc.prv.testnet", // new account name
+    //     "5Lx7Exo3VkSfYZ1pjFUKLYNFR6AmjAkmrL5NKWUDfNGi", // public key for new account
     //     "2000000000000000000000" // initial balance for new account in yoctoNEAR
     // );
-
+    //
     let balance = await account.getAccountBalance();
     console.log({balance});
 

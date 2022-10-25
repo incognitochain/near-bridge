@@ -72,6 +72,10 @@ pub struct Vault {
     pub unshield_storage_usage:  StorageUsage,
     // storage usage per beacon
     pub beacon_storage_usage:  StorageUsage,
+    // contract pause status
+    pub is_paused: bool,
+    // contract admin
+    pub admin: AccountId
 }
 
 // define the methods we'll use on ContractB
@@ -119,6 +123,8 @@ impl Vault {
             beacons: TreeMap::new(StorageKey::BeaconHeight),
             unshield_storage_usage: env::storage_usage(),
             beacon_storage_usage: env::storage_usage(),
+            is_paused: false,
+            admin: env::predecessor_account_id(),
         };
         let initial_storage_usage = env::storage_usage();
         // calculate near needed on each action
